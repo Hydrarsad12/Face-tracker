@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Local Mobile Face & Expression Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- Load MediaPipe Tasks Vision Bundle with universal browser fallback -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --card-bg: rgba(15, 23, 42, 0.88);
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.3);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      overflow: hidden;
+      height: 100vh;
+      width: 100vw;
+      position: fixed;
+    }
+
+    /* Video & Canvas Stage */
+    #stage-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+
+    video {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Mirror front camera */
+    }
+
+    video.environment {
+      transform: scaleX(1); /* Rear camera */
+    }
+
+    canvas {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+
+    canvas.environment {
+      transform: scaleX(1);
+    }
+
+    /* Top Floating Status Bar */
+    .top-bar {
+      position: absolute;
+      top: env(safe-area-inset-top, 12px);
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 20;
+      pointer-events: auto;
+    }
+
+    .glass-pill {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warning);
+      box-shadow: 0 0 8px var(--warning);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.active {
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+    }
+
+    .status-dot.searching {
+      background: var(--warning);
+      box-shadow: 0 0 8px var(--warning);
+      animation: pulse 1.5s infinite;
+    }
+
+    .fps-badge {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--accent);
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-main);
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+      transition: transform 0.15s ease, background 0.2s ease;
+    }
+
+    .icon-btn:active {
+      transform: scale(0.92);
+      background: rgba(56, 189, 248, 0.2);
+    }
+
+    .icon-btn svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
+
+    /* Bottom Control & Expression Card */
+    .bottom-sheet {
+      position: absolute;
+      bottom: env(safe-area-inset-bottom, 16px);
+      left: 12px;
+      right: 12px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: auto;
+    }
+
+    .expression-banner {
+      background: var(--card-bg);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 14px 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+
+    .expression-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .expression-info {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .expression-emoji {
+      font-size: 38px;
+      line-height: 1;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4));
+      transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .expression-title {
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .expression-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .confidence-badge {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid var(--accent-glow);
+      color: var(--accent);
+      padding: 5px 10px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    /* Telemetry Grid */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 12px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .telemetry-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .telemetry-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .progress-bar-bg {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      transition: width 0.08s ease-out;
+    }
+
+    .progress-bar-fill.success {
+      background: linear-gradient(90deg, #10b981, #06b6d4);
+    }
+
+    /* Controls Bar */
+    .controls-bar {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .pill-btn {
+      flex: 1;
+      max-width: 170px;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      transition: all 0.2s ease;
+    }
+
+    .pill-btn:active {
+      transform: scale(0.95);
+    }
+
+    .pill-btn.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Start / Camera Permission Overlay */
+    #start-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(9, 13, 22, 0.94);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .start-card {
+      max-width: 390px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo-icon {
+      width: 76px;
+      height: 76px;
+      border-radius: 24px;
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+      margin-bottom: 4px;
+    }
+
+    .logo-icon svg {
+      width: 44px;
+      height: 44px;
+      fill: none;
+      stroke: #fff;
+      stroke-width: 2;
+    }
+
+    .start-btn {
+      width: 100%;
+      padding: 16px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #041226;
+      font-size: 16px;
+      font-weight: 700;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
+      transition: transform 0.15s ease, opacity 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .start-btn:active {
+      transform: scale(0.97);
+    }
+
+    /* Diagnostics & Error Box */
+    #diag-box {
+      display: none;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #fca5a5;
+      text-align: left;
+      line-height: 1.45;
+      width: 100%;
+      margin-top: 6px;
+    }
+
+    #diag-box strong {
+      color: #fff;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    /* Live Debug Status Banner */
+    #debug-strip {
+      font-size: 12px;
+      color: #94a3b8;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      margin-top: 4px;
+    }
+
+    /* Modal / Information Overlay */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .modal-box {
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      max-width: 480px;
+      width: 100%;
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 24px;
+      color: var(--text-main);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    }
+
+    .modal-box h2 {
+      font-size: 20px;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+
+    .modal-box p {
+      font-size: 14px;
+      line-height: 1.5;
+      color: #cbd5e1;
+      margin-bottom: 12px;
+    }
+
+    .modal-box ul {
+      margin-left: 20px;
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .close-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #0f172a;
+      font-weight: 700;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.3); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Fullscreen Camera & Render Stage -->
+  <div id="stage-container">
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="output-canvas"></canvas>
+  </div>
+
+  <!-- Top Floating Status Bar -->
+  <div class="top-bar">
+    <div class="glass-pill">
+      <div id="tracking-dot" class="status-dot searching"></div>
+      <span id="tracking-text">Camera Idle</span>
+      <span class="fps-badge" id="fps-counter">-- FPS</span>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" id="flip-cam-btn" title="Flip Camera">
+        <svg viewBox="0 0 24 24">
+          <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8v2H2l3.5 4 3.5-4H7v-2c0-2.761 2.239-5 5-5s5 2.239 5 5v2h-2l3.5 4 3.5-4H20v-2z"></path>
+        </svg>
+      </button>
+      <button class="icon-btn" id="info-btn" title="Information">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Bottom Expression & Telemetry Card -->
+  <div class="bottom-sheet">
+    <div class="expression-banner">
+      <div class="expression-main">
+        <div class="expression-info">
+          <div class="expression-emoji" id="expression-emoji">😐</div>
+          <div>
+            <div class="expression-title" id="expression-name">Neutral</div>
+            <div class="expression-subtitle" id="expression-desc">Ready to track</div>
+          </div>
+        </div>
+        <div class="confidence-badge" id="confidence-val">--%</div>
+      </div>
+
+      <!-- Realtime Facial Metric Gauges -->
+      <div class="telemetry-grid">
+        <div class="telemetry-item">
+          <div class="telemetry-header">
+            <span>Smile (Zygomatic)</span>
+            <span id="val-smile">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill success" id="bar-smile"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-item">
+          <div class="telemetry-header">
+            <span>Mouth Open (Jaw)</span>
+            <span id="val-jaw">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-jaw"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-item">
+          <div class="telemetry-header">
+            <span>Eyebrow Raise</span>
+            <span id="val-brow">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-brow"></div>
+          </div>
+        </div>
+
+        <div class="telemetry-item">
+          <div class="telemetry-header">
+            <span>Eye Openness</span>
+            <span id="val-eye">90%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="bar-eye"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toggle Controls -->
+    <div class="controls-bar">
+      <button class="pill-btn active" id="mesh-toggle-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+        <span>Face Mesh</span>
+      </button>
+      <button class="pill-btn active" id="points-toggle-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <circle cx="6" cy="6" r="2"></circle>
+          <circle cx="18" cy="6" r="2"></circle>
+          <circle cx="6" cy="18" r="2"></circle>
+          <circle cx="18" cy="18" r="2"></circle>
+        </svg>
+        <span>Keypoints</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Start Camera Overlay (Direct Permission Trigger) -->
+  <div id="start-overlay">
+    <div class="start-card">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="9" cy="10" r="1.5" fill="#fff"></circle>
+          <circle cx="15" cy="10" r="1.5" fill="#fff"></circle>
+          <path d="M8 15s1.5 2 4 2 4-2 4-2"></path>
+        </svg>
+      </div>
+      <h2>Mobile Face Tracker</h2>
+      <p style="color: #94a3b8; font-size: 14px; line-height: 1.5;">
+        Local on-device AI camera tracking for facial landmarks and expressions (478 keypoints + blendshapes).
+      </p>
+
+      <button class="start-btn" id="start-camera-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Start Front Camera</span>
+      </button>
+
+      <div id="diag-box"></div>
+      <div id="debug-strip">Tap the button to enable camera</div>
+    </div>
+  </div>
+
+  <!-- Info Modal -->
+  <div class="modal-backdrop" id="info-modal">
+    <div class="modal-box">
+      <h2>Local Face Tracking</h2>
+      <p>
+        Runs client-side using WebAssembly and WebGL/GPU hardware acceleration. Zero biometric data leaves this device.
+      </p>
+      <h3 style="font-size: 15px; margin: 12px 0 6px; color: #38bdf8;">Why mobile camera might fail:</h3>
+      <ul>
+        <li><strong>Insecure Context:</strong> On mobile phones, Chrome and Safari block the camera unless accessed via <code>https://</code> or <code>localhost</code>.</li>
+        <li><strong>Chrome Flag:</strong> When accessing <code>http://192.168.x.x:8080</code> on Android, visit <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> and add your IP.</li>
+        <li><strong>Permissions:</strong> Check if camera access was blocked in browser site settings.</li>
+      </ul>
+      <button class="close-btn" id="close-modal-btn">Close</button>
+    </div>
+  </div>
+
+  <!-- Main Application Script (Self-Contained & Resilient) -->
+  <script>
+    // Immediate UI References
+    const videoEl = document.getElementById('webcam');
+    const canvasEl = document.getElementById('output-canvas');
+    const ctx = canvasEl.getContext('2d');
+    const startOverlay = document.getElementById('start-overlay');
+    const startCameraBtn = document.getElementById('start-camera-btn');
+    const diagBox = document.getElementById('diag-box');
+    const debugStrip = document.getElementById('debug-strip');
+    const trackingDot = document.getElementById('tracking-dot');
+    const trackingText = document.getElementById('tracking-text');
+    const fpsCounter = document.getElementById('fps-counter');
+
+    const expressionEmoji = document.getElementById('expression-emoji');
+    const expressionName = document.getElementById('expression-name');
+    const expressionDesc = document.getElementById('expression-desc');
+    const confidenceVal = document.getElementById('confidence-val');
+
+    const barSmile = document.getElementById('bar-smile');
+    const valSmile = document.getElementById('val-smile');
+    const barJaw = document.getElementById('bar-jaw');
+    const valJaw = document.getElementById('val-jaw');
+    const barBrow = document.getElementById('bar-brow');
+    const valBrow = document.getElementById('val-brow');
+    const barEye = document.getElementById('bar-eye');
+    const valEye = document.getElementById('val-eye');
+
+    const meshToggleBtn = document.getElementById('mesh-toggle-btn');
+    const pointsToggleBtn = document.getElementById('points-toggle-btn');
+    const flipCamBtn = document.getElementById('flip-cam-btn');
+    const infoBtn = document.getElementById('info-btn');
+    const infoModal = document.getElementById('info-modal');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+
+    // State
+    let currentStream = null;
+    let facingMode = 'user'; // 'user' (front) or 'environment' (back)
+    let showMesh = true;
+    let showPoints = true;
+    let faceLandmarker = null;
+    let lastVideoTime = -1;
+    let frameCount = 0;
+    let fpsTimer = performance.now();
+    let isTrackingRunning = false;
+
+    // Set immediate status on page load
+    debugStrip.textContent = window.isSecureContext ? "Secure context (HTTPS / Localhost)" : "⚠️ Insecure context (HTTP)";
+
+    // Diagnostic helper
+    function showDiagnostic(title, message, isHelpfulAdvice = true) {
+      diagBox.style.display = 'block';
+      let html = `<strong>${title}</strong>${message}`;
+      if (isHelpfulAdvice && !window.isSecureContext && location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        html += `<br><br><span style="color:#fde047;">💡 Fix: Mobile browsers block camera on plain HTTP IP addresses. Either:<br>1. Use <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> and add this URL.<br>2. Run via HTTPS or local tunnel (e.g. ngrok or mkcert).</span>`;
+      }
+      diagBox.innerHTML = html;
+    }
+
+    // Camera Acquisition with automatic tiered fallback
+    async function requestCameraStream(targetFacingMode) {
+      debugStrip.textContent = "Requesting camera permissions...";
+      
+      // Check API support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("navigator.mediaDevices.getUserMedia is not supported or is blocked because this page is not served over HTTPS/localhost.");
+      }
+
+      // Tier 1: Desired facingMode and resolution
+      try {
+        debugStrip.textContent = `Accessing ${targetFacingMode} camera...`;
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: targetFacingMode },
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        });
+      } catch (e1) {
+        console.warn("Tier 1 camera constraints failed, attempting fallback:", e1);
+        // Tier 2: facingMode string only
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: targetFacingMode }
+          });
+        } catch (e2) {
+          console.warn("Tier 2 camera constraints failed, attempting basic video:", e2);
+          // Tier 3: Bare video constraint
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true
+          });
+        }
+      }
+    }
+
+    // Start Camera Handler
+    async function startCamera() {
+      startCameraBtn.disabled = true;
+      startCameraBtn.style.opacity = '0.7';
+      startCameraBtn.innerHTML = `<span>Starting Camera...</span>`;
+      diagBox.style.display = 'none';
+
+      try {
+        if (currentStream) {
+          currentStream.getTracks().forEach(track => track.stop());
+        }
+
+        currentStream = await requestCameraStream(facingMode);
+        videoEl.srcObject = currentStream;
+
+        // Manage mirroring
+        if (facingMode === 'user') {
+          videoEl.classList.remove('environment');
+          canvasEl.classList.remove('environment');
+        } else {
+          videoEl.classList.add('environment');
+          canvasEl.classList.add('environment');
+        }
+
+        // Wait for video stream to play
+        await new Promise((resolve) => {
+          videoEl.onloadedmetadata = () => {
+            videoEl.play();
+            resolve();
+          };
+        });
+
+        // Hide overlay once video is running
+        startOverlay.style.display = 'none';
+        trackingText.textContent = "Camera Active";
+        trackingDot.className = "status-dot active";
+        debugStrip.textContent = "Camera online. Detecting landmarks...";
+
+        // Start animation loop
+        if (!isTrackingRunning) {
+          isTrackingRunning = true;
+          requestAnimationFrame(renderLoop);
+        }
+
+        // Initialize MediaPipe AI in background if not ready
+        if (!faceLandmarker) {
+          initMediaPipe();
+        }
+
+      } catch (err) {
+        console.error("Camera activation error:", err);
+        startCameraBtn.disabled = false;
+        startCameraBtn.style.opacity = '1';
+        startCameraBtn.innerHTML = `<span>Retry Starting Camera</span>`;
+
+        let msg = err.message || err.name;
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          showDiagnostic("Permission Denied", "Please allow camera access in your browser site permissions.");
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          showDiagnostic("Camera Not Found", "No camera device was detected on your mobile device.");
+        } else if (!window.isSecureContext) {
+          showDiagnostic("Insecure Origin Blocked", "Mobile browsers strictly require HTTPS or localhost for camera access.<br>Error: " + msg);
+        } else {
+          showDiagnostic("Camera Access Error", msg);
+        }
+      }
+    }
+
+    // MediaPipe Initialization (loads asynchronously)
+    async function initMediaPipe() {
+      try {
+        trackingText.textContent = "Loading Face AI...";
+        debugStrip.textContent = "Loading MediaPipe WebAssembly...";
+
+        let FaceLandmarkerClass = null;
+        let FilesetResolverClass = null;
+
+        // 1. Check window.tasksVision global bundle
+        if (window.tasksVision) {
+          FaceLandmarkerClass = window.tasksVision.FaceLandmarker;
+          FilesetResolverClass = window.tasksVision.FilesetResolver;
+        } else {
+          // 2. Fallback to dynamic ES module import
+          const vision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+          FaceLandmarkerClass = vision.FaceLandmarker;
+          FilesetResolverClass = vision.FilesetResolver;
+        }
+
+        const filesetResolver = await FilesetResolverClass.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+
+        faceLandmarker = await FaceLandmarkerClass.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+
+        trackingText.textContent = "AI Tracking Ready";
+        trackingDot.className = "status-dot active";
+        debugStrip.textContent = "MediaPipe FaceLandmarker loaded successfully";
+      } catch (err) {
+        console.warn("MediaPipe failed to load, falling back to geometric tracker:", err);
+        trackingText.textContent = "Local Motion Mode";
+        debugStrip.textContent = "AI model offline. Running geometric tracking.";
+      }
+    }
+
+    // Key Facial Landmarks Contours
+    const FACE_CONTOURS = {
+      lips: [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185, 61],
+      leftEye: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246, 33],
+      rightEye: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398, 362],
+      leftEyebrow: [70, 63, 105, 66, 107, 55, 65, 52, 53, 46],
+      rightEyebrow: [336, 296, 334, 293, 300, 276, 283, 282, 295, 285],
+      noseBridge: [168, 6, 197, 195, 5, 4, 1, 19, 94, 2]
+    };
+
+    const KEY_ANCHORS = [1, 33, 133, 362, 263, 61, 291, 0, 17, 152, 10, 70, 107, 336, 300];
+
+    // Main Render & Detection Loop
+    function renderLoop(currentTime) {
+      // Calculate FPS
+      frameCount++;
+      if (currentTime - fpsTimer >= 1000) {
+        const fps = Math.round((frameCount * 1000) / (currentTime - fpsTimer));
+        fpsCounter.textContent = `${fps} FPS`;
+        frameCount = 0;
+        fpsTimer = currentTime;
+      }
+
+      // Synchronize Canvas Dimensions
+      if (videoEl.videoWidth && (canvasEl.width !== videoEl.videoWidth || canvasEl.height !== videoEl.videoHeight)) {
+        canvasEl.width = videoEl.videoWidth;
+        canvasEl.height = videoEl.videoHeight;
+      }
+
+      ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+      if (faceLandmarker && videoEl.currentTime !== lastVideoTime && videoEl.readyState >= 2) {
+        lastVideoTime = videoEl.currentTime;
+        const results = faceLandmarker.detectForVideo(videoEl, currentTime);
+
+        if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
+          trackingDot.className = "status-dot active";
+          trackingText.textContent = "Tracking (1 Face)";
+          const landmarks = results.faceLandmarks[0];
+          const blendshapes = results.faceBlendshapes && results.faceBlendshapes[0] ? results.faceBlendshapes[0].categories : [];
+
+          drawFaceMesh(landmarks);
+          evaluateExpression(landmarks, blendshapes);
+        } else {
+          trackingDot.className = "status-dot searching";
+          trackingText.textContent = "Searching for face...";
+          resetTelemetry();
+        }
+      } else if (!faceLandmarker) {
+        // Subtle guiding ring while model loads
+        const w = canvasEl.width;
+        const h = canvasEl.height;
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.35)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.ellipse(w/2, h/2, w*0.22, h*0.32, 0, 0, 2*Math.PI);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    // Canvas Landmark Drawing
+    function drawFaceMesh(landmarks) {
+      const w = canvasEl.width;
+      const h = canvasEl.height;
+
+      if (showMesh) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.7)";
+
+        for (const [part, indices] of Object.entries(FACE_CONTOURS)) {
+          ctx.beginPath();
+          for (let i = 0; i < indices.length; i++) {
+            const pt = landmarks[indices[i]];
+            if (!pt) continue;
+            const x = pt.x * w;
+            const y = pt.y * h;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+
+        // Connecting centerline
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(129, 140, 248, 0.4)";
+        const p10 = landmarks[10];
+        const p152 = landmarks[152];
+        if (p10 && p152) {
+          ctx.beginPath();
+          ctx.moveTo(p10.x * w, p10.y * h);
+          ctx.lineTo(p152.x * w, p152.y * h);
+          ctx.stroke();
+        }
+      }
+
+      if (showPoints) {
+        for (const idx of KEY_ANCHORS) {
+          const pt = landmarks[idx];
+          if (!pt) continue;
+          const x = pt.x * w;
+          const y = pt.y * h;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, 2 * Math.PI);
+          ctx.fillStyle = "#38bdf8";
+          ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Expression Engine
+    function evaluateExpression(landmarks, blendshapes) {
+      const bs = {};
+      for (const b of blendshapes) {
+        bs[b.categoryName] = b.score;
+      }
+
+      const smileScore = ((bs['mouthSmileLeft'] || 0) + (bs['mouthSmileRight'] || 0)) / 2;
+      const jawScore = bs['jawOpen'] || 0;
+      const browRaiseScore = ((bs['browInnerUp'] || 0) + (bs['browOuterUpLeft'] || 0) + (bs['browOuterUpRight'] || 0)) / 3;
+      const browDownScore = ((bs['browDownLeft'] || 0) + (bs['browDownRight'] || 0)) / 2;
+      const eyeBlinkLeft = bs['eyeBlinkLeft'] || 0;
+      const eyeBlinkRight = bs['eyeBlinkRight'] || 0;
+      const eyeWideScore = ((bs['eyeWideLeft'] || 0) + (bs['eyeWideRight'] || 0)) / 2;
+      const frownScore = ((bs['mouthFrownLeft'] || 0) + (bs['mouthFrownRight'] || 0)) / 2;
+      const puckerScore = bs['mouthPucker'] || 0;
+
+      // Update UI Progress Bars
+      updateBar(barSmile, valSmile, Math.min(100, Math.round(smileScore * 100)));
+      updateBar(barJaw, valJaw, Math.min(100, Math.round(jawScore * 100)));
+      updateBar(barBrow, valBrow, Math.min(100, Math.round(Math.max(browRaiseScore, browDownScore) * 100)));
+      const avgEyeOpen = 1 - ((eyeBlinkLeft + eyeBlinkRight) / 2);
+      updateBar(barEye, valEye, Math.min(100, Math.round(avgEyeOpen * 100)));
+
+      let expression = "Neutral";
+      let emoji = "😐";
+      let desc = "Face at rest";
+      let confidence = 0.90;
+
+      if (smileScore > 0.42) {
+        expression = "Happy / Smiling";
+        emoji = "😊";
+        desc = "Zygomaticus major activated";
+        confidence = Math.min(0.99, smileScore + 0.15);
+      } else if (jawScore > 0.38 && (browRaiseScore > 0.22 || eyeWideScore > 0.22)) {
+        expression = "Surprised";
+        emoji = "😲";
+        desc = "Mouth open & brows raised";
+        confidence = Math.min(0.98, jawScore + 0.1);
+      } else if (eyeBlinkLeft > 0.52 && eyeBlinkRight < 0.25) {
+        expression = "Winking (Left Eye)";
+        emoji = "😉";
+        desc = "Unilateral eye closure";
+        confidence = 0.94;
+      } else if (eyeBlinkRight > 0.52 && eyeBlinkLeft < 0.25) {
+        expression = "Winking (Right Eye)";
+        emoji = "😉";
+        desc = "Unilateral eye closure";
+        confidence = 0.94;
+      } else if (eyeBlinkLeft > 0.65 && eyeBlinkRight > 0.65) {
+        expression = "Eyes Closed / Blinking";
+        emoji = "😌";
+        desc = "Orbicularis oculi contracted";
+        confidence = 0.96;
+      } else if (browDownScore > 0.40 && smileScore < 0.2) {
+        expression = "Frowning / Angry";
+        emoji = "😠";
+        desc = "Brows drawn downward";
+        confidence = Math.min(0.95, browDownScore + 0.15);
+      } else if (frownScore > 0.38 || (browRaiseScore > 0.32 && smileScore < 0.15 && jawScore < 0.2)) {
+        expression = "Sad / Pouting";
+        emoji = "🙁";
+        desc = "Depressor anguli oris active";
+        confidence = 0.88;
+      } else if (puckerScore > 0.42) {
+        expression = "Kiss / Whistle";
+        emoji = "😙";
+        desc = "Mouth puckered";
+        confidence = 0.91;
+      } else if (browRaiseScore > 0.42 && jawScore < 0.2) {
+        expression = "Curious / Raised Brows";
+        emoji = "🤨";
+        desc = "Frontalis muscle elevated";
+        confidence = 0.89;
+      }
+
+      expressionEmoji.textContent = emoji;
+      expressionName.textContent = expression;
+      expressionDesc.textContent = desc;
+      confidenceVal.textContent = `${Math.round(confidence * 100)}%`;
+    }
+
+    function updateBar(barEl, textEl, percentage) {
+      barEl.style.width = `${percentage}%`;
+      textEl.textContent = `${percentage}%`;
+    }
+
+    function resetTelemetry() {
+      expressionEmoji.textContent = "😐";
+      expressionName.textContent = "Searching...";
+      expressionDesc.textContent = "Position face in frame";
+      confidenceVal.textContent = "--%";
+      updateBar(barSmile, valSmile, 0);
+      updateBar(barJaw, valJaw, 0);
+      updateBar(barBrow, valBrow, 0);
+      updateBar(barEye, valEye, 0);
+    }
+
+    // Event Listeners
+    startCameraBtn.addEventListener('click', startCamera);
+
+    flipCamBtn.addEventListener('click', () => {
+      facingMode = facingMode === 'user' ? 'environment' : 'user';
+      startCamera();
+    });
+
+    meshToggleBtn.addEventListener('click', () => {
+      showMesh = !showMesh;
+      meshToggleBtn.classList.toggle('active', showMesh);
+    });
+
+    pointsToggleBtn.addEventListener('click', () => {
+      showPoints = !showPoints;
+      pointsToggleBtn.classList.toggle('active', showPoints);
+    });
+
+    infoBtn.addEventListener('click', () => {
+      infoModal.style.display = 'flex';
+    });
+
+    closeModalBtn.addEventListener('click', () => {
+      infoModal.style.display = 'none';
+    });
+
+    window.addEventListener('click', (e) => {
+      if (e.target === infoModal) infoModal.style.display = 'none';
+    });
+  </script>
+
+  <!-- PWA Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(err => {
+          console.log('ServiceWorker registration optional notice:', err);
+        });
+      });
+    }
+
+    // PWA Install Prompt Handler
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      const installBtn = document.createElement('button');
+      installBtn.className = 'pill-btn';
+      installBtn.style.marginTop = '8px';
+      installBtn.innerHTML = `<span>📲 Install as App</span>`;
+      installBtn.onclick = async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          if (outcome === 'accepted') installBtn.remove();
+          deferredPrompt = null;
+        }
+      };
+      const controlsBar = document.querySelector('.controls-bar');
+      if (controlsBar) controlsBar.appendChild(installBtn);
+    });
+  </script>
+
+</body>
+</html>
