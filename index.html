@@ -1,0 +1,3124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#090d16">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="FitGuard AI">
+  <title>FitGuard AI — Multi-Exercise & Posture Coach</title>
+  <!-- Google Identity Services for Google Account Sign-In -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- Load MediaPipe Tasks Vision (Pose Landmarker) -->
+  <script type="module">
+    import {
+      PoseLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    window.MediaPipeVision = {
+      PoseLandmarker,
+      FilesetResolver,
+      DrawingUtils
+    };
+    window.dispatchEvent(new CustomEvent('mediapipe-ready'));
+  </script>
+
+  <style>
+    :root {
+      --bg: #090d16;
+      --bg-elevated: #0f172a;
+      --card: rgba(15, 23, 42, 0.88);
+      --card-solid: #111c33;
+      --accent: #38bdf8;
+      --accent-secondary: #6366f1;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      position: fixed;
+    }
+
+    /* ==========================================
+       VIEW 1: EXERCISE SELECTION HUB (DEFAULT)
+       ========================================== */
+    #exercise-menu {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.14), transparent 55%), var(--bg);
+      z-index: 60;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: env(safe-area-inset-top, 16px) 16px calc(env(safe-area-inset-bottom, 20px) + 20px);
+    }
+
+    .hub-container {
+      max-width: 540px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding-top: 8px;
+    }
+
+    .hub-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 4px;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-badge {
+      width: 46px;
+      height: 46px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 6px 20px rgba(56, 189, 248, 0.3);
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      color: #fff;
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    /* ==========================================
+       VIEW 0: AUTHENTICATION (LOGIN / SIGN UP)
+       ========================================== */
+    #auth-screen {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.16), transparent 55%), var(--bg);
+      z-index: 80;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 410px;
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.84));
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 24px;
+      padding: 24px 22px;
+      box-shadow: 0 22px 55px rgba(0, 0, 0, 0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .auth-brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 8px;
+    }
+
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 4px;
+      gap: 4px;
+    }
+
+    .auth-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .auth-tab.active {
+      background: var(--accent);
+      color: #041226;
+      box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+    }
+
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .password-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .password-wrap .form-input {
+      width: 100%;
+      padding-right: 44px;
+    }
+
+    .toggle-pw-btn {
+      position: absolute;
+      right: 10px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 4px 6px;
+    }
+
+    .auth-error {
+      display: none;
+      background: rgba(239, 68, 68, 0.14);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 9px 12px;
+      border-radius: 10px;
+      line-height: 1.4;
+    }
+
+    .auth-error.visible {
+      display: block;
+    }
+
+    .remember-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .remember-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+    }
+
+    .remember-label input {
+      accent-color: var(--accent);
+      width: 15px;
+      height: 15px;
+    }
+
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .auth-divider::before,
+    .auth-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .guest-btn {
+      width: 100%;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #e2e8f0;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .guest-btn:active {
+      transform: scale(0.98);
+    }
+
+    .google-btn {
+      width: 100%;
+      padding: 12px 16px;
+      background: #ffffff;
+      color: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    .google-btn:active {
+      transform: scale(0.98);
+    }
+
+    .google-btn:hover {
+      background: #f1f5f9;
+    }
+
+    .google-setup-link {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline;
+      align-self: center;
+      padding: 2px 6px;
+    }
+
+    .account-avatar img {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .account-pill-btn {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: #fff;
+      border-radius: 9999px;
+      padding: 5px 12px 5px 6px;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      transition: transform 0.15s, border-color 0.2s;
+      white-space: nowrap;
+      max-width: 155px;
+    }
+
+    .account-pill-btn:active {
+      transform: scale(0.95);
+    }
+
+    .account-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .account-name-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .danger-btn {
+      width: 100%;
+      padding: 13px;
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #fca5a5;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .danger-btn:active {
+      transform: scale(0.98);
+    }
+
+    /* Summary Stats Banner */
+    .stats-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .stat-box {
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat-box-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+
+    .stat-box-val {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    /* Category Filter Tabs */
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+    }
+
+    .filter-row::-webkit-scrollbar {
+      display: none;
+    }
+
+    .cat-tab {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 8px 14px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .cat-tab.active {
+      background: var(--accent);
+      color: #041226;
+      border-color: var(--accent);
+      box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+    }
+
+    /* Exercise List Cards */
+    .section-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .add-custom-btn {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: var(--accent);
+      border-radius: 10px;
+      padding: 6px 11px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .exercise-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .exercise-card {
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.75));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.2s, box-shadow 0.2s;
+      position: relative;
+      overflow: hidden;
+      text-align: left;
+      width: 100%;
+      color: var(--text);
+    }
+
+    .exercise-card:hover,
+    .exercise-card:focus-visible {
+      border-color: rgba(56, 189, 248, 0.55);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+    }
+
+    .exercise-card:active {
+      transform: scale(0.985);
+    }
+
+    .exercise-card.featured {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: linear-gradient(145deg, rgba(14, 30, 56, 0.95), rgba(15, 23, 42, 0.9));
+    }
+
+    .ex-card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .ex-icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: rgba(56, 189, 248, 0.14);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .ex-info {
+      flex: 1;
+    }
+
+    .ex-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ex-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .ex-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.18);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .ex-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .ex-metrics-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ex-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .ex-tag {
+      font-size: 11px;
+      font-weight: 600;
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 4px 9px;
+      border-radius: 8px;
+    }
+
+    .ex-start-cta {
+      background: var(--accent);
+      color: #041226;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 7px 14px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      box-shadow: 0 4px 12px rgba(56, 189, 248, 0.25);
+    }
+
+    /* ==========================================
+       VIEW 2: CAMERA & AI WORKOUT STAGE
+       ========================================== */
+    #stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    video {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    video.environment {
+      transform: scaleX(1);
+    }
+
+    canvas {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+
+    canvas.environment {
+      transform: scaleX(1);
+    }
+
+    /* Top HUD */
+    .top-hud {
+      position: absolute;
+      top: env(safe-area-inset-top, 14px);
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 20;
+      gap: 8px;
+    }
+
+    .top-left-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .back-list-btn {
+      background: var(--card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      padding: 8px 13px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+      white-space: nowrap;
+    }
+
+    .back-list-btn:active {
+      transform: scale(0.94);
+    }
+
+    .pill {
+      background: var(--card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      padding: 8px 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      min-width: 0;
+    }
+
+    #status-text {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 150px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warning);
+      box-shadow: 0 0 10px var(--warning);
+      transition: all 0.3s;
+      flex-shrink: 0;
+    }
+
+    .status-dot.active {
+      background: var(--success);
+      box-shadow: 0 0 12px var(--success);
+    }
+
+    .icon-btn {
+      background: var(--card);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      width: 42px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+      transition: transform 0.15s;
+      flex-shrink: 0;
+    }
+
+    .icon-btn:active {
+      transform: scale(0.92);
+    }
+
+    /* Floating Rep Counter (Large & High Contrast) */
+    .rep-counter-card {
+      position: absolute;
+      top: calc(env(safe-area-inset-top, 14px) + 56px);
+      left: 14px;
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 12px 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 20;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      min-width: 118px;
+    }
+
+    .rep-count-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent);
+    }
+
+    .rep-number {
+      font-size: 46px;
+      font-weight: 900;
+      line-height: 1.05;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: #fff;
+      text-shadow: 0 2px 10px rgba(56, 189, 248, 0.5);
+    }
+
+    .rep-stage {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-align: center;
+    }
+
+    /* Anti-Cheat / Body Orientation Pill on HUD */
+    .motion-guard-pill {
+      position: absolute;
+      top: calc(env(safe-area-inset-top, 14px) + 56px);
+      right: 14px;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px 12px;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 3px;
+    }
+
+    .guard-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .guard-state {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--warning);
+    }
+
+    .guard-state.locked {
+      color: var(--success);
+    }
+
+    /* Bottom Posture Analysis Sheet */
+    .bottom-hud {
+      position: absolute;
+      bottom: env(safe-area-inset-bottom, 16px);
+      left: 14px;
+      right: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 20;
+    }
+
+    .posture-banner {
+      background: var(--card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      transition: border-color 0.3s;
+    }
+
+    .posture-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+
+    .posture-title {
+      font-size: 17px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-verdict {
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      white-space: nowrap;
+    }
+
+    .form-verdict.warning {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--warning);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .form-verdict.danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .posture-feedback-text {
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.4;
+      margin-bottom: 12px;
+      font-weight: 500;
+    }
+
+    /* Angle Gauges */
+    .angles-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .angle-card {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 9px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .angle-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .angle-val-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 4px;
+    }
+
+    .angle-degrees {
+      font-size: 20px;
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      color: var(--accent);
+    }
+
+    .angle-target {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .angle-bar-bg {
+      height: 5px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 3px;
+    }
+
+    .angle-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.08s ease-out;
+    }
+
+    /* Controls Bar */
+    .controls-bar {
+      display: flex;
+      gap: 10px;
+    }
+
+    .ctrl-btn {
+      flex: 1;
+      padding: 11px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .ctrl-btn:active {
+      transform: scale(0.96);
+    }
+
+    .ctrl-btn.active {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Start Overlay (Shown when an exercise is clicked before camera starts) */
+    #start-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(9, 13, 22, 0.94);
+      backdrop-filter: blur(14px);
+      z-index: 50;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .start-card {
+      max-width: 390px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .start-icon {
+      width: 76px;
+      height: 76px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.4);
+    }
+
+    .start-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #041226;
+      font-size: 16px;
+      font-weight: 800;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(56, 189, 248, 0.35);
+    }
+
+    .secondary-back-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 11px 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    /* Modals (Install App / Add Custom Exercise) */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 8, 16, 0.82);
+      backdrop-filter: blur(10px);
+      z-index: 90;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-sheet {
+      background: #0f172a;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 22px;
+      max-width: 440px;
+      width: 100%;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .modal-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+
+    .close-modal-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      color: #cbd5e1;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: left;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .form-input, .form-select {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+
+    .form-input:focus, .form-select:focus {
+      border-color: var(--accent);
+    }
+
+    .form-row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .install-step {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.45;
+    }
+
+    /* Toast banner */
+    #toast-banner {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #0f172a;
+      border: 1px solid var(--accent);
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 9999px;
+      font-size: 13px;
+      font-weight: 700;
+      z-index: 120;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s ease;
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.6);
+    }
+
+    #toast-banner.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- =========================================================
+       VIEW 0: LOGIN / SIGN UP SCREEN
+       ========================================================= -->
+  <div id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="brand-badge" style="width:58px; height:58px; border-radius:18px;">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2">
+            <circle cx="12" cy="5" r="2.5"></circle>
+            <path d="M4 17l6-5 4 4 6-6"></path>
+            <path d="M3 21h18"></path>
+          </svg>
+        </div>
+        <div class="brand-title" style="font-size:22px;">FitGuard AI Coach</div>
+        <div class="brand-sub">Sign in to save your reps, posture stats &amp; custom exercises</div>
+      </div>
+
+      <div class="auth-tabs" id="auth-tabs">
+        <button type="button" class="auth-tab active" data-auth-mode="login" id="tab-login">Sign In</button>
+        <button type="button" class="auth-tab" data-auth-mode="signup" id="tab-signup">Create Account</button>
+      </div>
+
+      <div id="auth-error" class="auth-error"></div>
+
+      <form class="auth-form" id="auth-form" novalidate>
+        <div class="form-group" id="signup-name-group" style="display:none;">
+          <label for="auth-name">Full Name</label>
+          <input id="auth-name" class="form-input" type="text" autocomplete="name" placeholder="e.g. Alex Sharma">
+        </div>
+
+        <div class="form-group">
+          <label for="auth-email">Email or Username</label>
+          <input id="auth-email" class="form-input" type="text" autocomplete="username" placeholder="you@example.com">
+        </div>
+
+        <div class="form-group">
+          <label for="auth-password">Password</label>
+          <div class="password-wrap">
+            <input id="auth-password" class="form-input" type="password" autocomplete="current-password" placeholder="Enter password (min 6 chars)">
+            <button type="button" class="toggle-pw-btn" id="toggle-pw-btn">Show</button>
+          </div>
+        </div>
+
+        <div class="form-group" id="signup-confirm-group" style="display:none;">
+          <label for="auth-confirm-password">Confirm Password</label>
+          <input id="auth-confirm-password" class="form-input" type="password" autocomplete="new-password" placeholder="Re-enter password">
+        </div>
+
+        <div class="remember-row">
+          <label class="remember-label">
+            <input type="checkbox" id="auth-remember" checked>
+            <span>Keep me signed in</span>
+          </label>
+          <span style="color:var(--accent); font-weight:600; font-size:11px;">Local Encrypted Auth</span>
+        </div>
+
+        <button type="submit" class="start-btn" id="auth-submit-btn">Sign In</button>
+      </form>
+
+      <div class="auth-divider">or</div>
+
+      <button type="button" class="google-btn" id="google-login-btn">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        <span>Continue with Google</span>
+      </button>
+
+      <div id="google-gsi-button-slot" style="display:none; justify-content:center;"></div>
+
+      <button type="button" class="guest-btn" id="guest-login-btn">Continue as Guest</button>
+      <button type="button" class="google-setup-link" id="open-google-setup-btn">Configure Google Client ID</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       VIEW 1: CLICKABLE EXERCISE LIST HUB
+       ========================================================= -->
+  <div id="exercise-menu" style="display:none;">
+    <div class="hub-container">
+      <div class="hub-header">
+        <div class="brand-row">
+          <div class="brand-badge">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2">
+              <circle cx="12" cy="5" r="2.5"></circle>
+              <path d="M4 17l6-5 4 4 6-6"></path>
+              <path d="M3 21h18"></path>
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">FitGuard AI Coach</div>
+            <div class="brand-sub">3D Pose Angle &amp; Anti-Cheat Rep Tracker</div>
+          </div>
+        </div>
+        <button class="account-pill-btn" id="account-menu-btn" type="button" title="Account &amp; Sign Out">
+          <span class="account-avatar" id="account-avatar">G</span>
+          <span class="account-name-text" id="account-name-label">Guest</span>
+        </button>
+      </div>
+
+      <!-- Session Summary Strip -->
+      <div class="stats-strip">
+        <div class="stat-box">
+          <span class="stat-box-label">Total Reps</span>
+          <span class="stat-box-val" id="hub-total-reps">0</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-box-label">Exercises</span>
+          <span class="stat-box-val" id="hub-exercise-count">5</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-box-label">Motion Filter</span>
+          <span class="stat-box-val" style="color:var(--success); font-size:14px;">STRICT 3D</span>
+        </div>
+      </div>
+
+      <!-- Category Filter Pills -->
+      <div class="filter-row" id="category-tabs">
+        <button type="button" class="cat-tab active" data-cat="all">All Exercises</button>
+        <button type="button" class="cat-tab" data-cat="Upper Body">Upper Body</button>
+        <button type="button" class="cat-tab" data-cat="Lower Body">Lower Body</button>
+        <button type="button" class="cat-tab" data-cat="Core">Core</button>
+        <button type="button" class="cat-tab" data-cat="Custom">Custom</button>
+      </div>
+
+      <div class="section-label-row">
+        <span class="section-label">Select an Exercise to Start</span>
+        <button type="button" class="add-custom-btn" id="open-add-exercise-btn">
+          <span>+ Add Exercise</span>
+        </button>
+      </div>
+
+      <!-- Clickable Exercise List -->
+      <div class="exercise-list" id="exercise-list"></div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       VIEW 2: ACTIVE CAMERA WORKOUT & POSTURE HUD
+       ========================================================= -->
+  <div id="stage">
+    <video id="webcam" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="top-hud">
+    <div class="top-left-group">
+      <button class="back-list-btn" id="back-to-list-btn" type="button" title="Back to Exercise List">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>Exercises</span>
+      </button>
+      <div class="pill">
+        <div id="status-dot" class="status-dot"></div>
+        <span id="status-text">Position sideways to camera</span>
+        <span style="color:var(--accent); font-family:monospace;" id="fps">-- FPS</span>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="icon-btn" id="flip-btn" type="button" title="Flip Camera">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 10c0-4.418-3.582-8-8-8s-8 3.582-8 8v2H2l3.5 4 3.5-4H7v-2c0-2.761 2.239-5 5-5s5 2.239 5 5v2h-2l3.5 4 3.5-4H20v-2z"></path>
+        </svg>
+      </button>
+      <button class="icon-btn" id="sound-btn" type="button" title="Toggle Audio Voice Coach">
+        <svg id="sound-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Repetition HUD -->
+  <div class="rep-counter-card">
+    <span class="rep-count-label" id="rep-label">Push-Ups</span>
+    <span class="rep-number" id="rep-val">0</span>
+    <span class="rep-stage" id="stage-val">TOP / READY</span>
+  </div>
+
+  <!-- Anti-Cheat Motion Lock Pill -->
+  <div class="motion-guard-pill">
+    <span class="guard-label">Position Lock</span>
+    <span class="guard-state" id="guard-state">Waiting for Stance</span>
+  </div>
+
+  <!-- Posture & Angle HUD -->
+  <div class="bottom-hud">
+    <div class="posture-banner">
+      <div class="posture-header">
+        <div class="posture-title" id="posture-headline">
+          <span id="active-exercise-title">Side View Push-Up</span>
+        </div>
+        <div class="form-verdict" id="form-verdict">Good Posture</div>
+      </div>
+
+      <div class="posture-feedback-text" id="feedback-text">
+        Get into a horizontal plank position facing the camera sideways. Random standing or arm movements are ignored.
+      </div>
+
+      <div class="angles-grid">
+        <!-- Primary Joint Angle (e.g. Elbow or Knee) -->
+        <div class="angle-card">
+          <span class="angle-label" id="label-primary-angle">Elbow Angle (Arm)</span>
+          <div class="angle-val-row">
+            <span class="angle-degrees" id="val-elbow">--°</span>
+            <span class="angle-target" id="target-primary-angle">Target: ≤ 90° (Down)</span>
+          </div>
+          <div class="angle-bar-bg">
+            <div class="angle-bar-fill" id="bar-elbow"></div>
+          </div>
+        </div>
+
+        <!-- Secondary Alignment Angle (e.g. Back / Hip Line) -->
+        <div class="angle-card">
+          <span class="angle-label" id="label-secondary-angle">Back / Hip Line</span>
+          <div class="angle-val-row">
+            <span class="angle-degrees" id="val-back">--°</span>
+            <span class="angle-target" id="target-secondary-angle">Target: 160° - 180°</span>
+          </div>
+          <div class="angle-bar-bg">
+            <div class="angle-bar-fill" id="bar-back"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls-bar">
+      <button class="ctrl-btn" id="reset-reps-btn" type="button">Reset Counter</button>
+      <button class="ctrl-btn active" id="skeleton-btn" type="button">Skeleton Overlay</button>
+    </div>
+  </div>
+
+  <!-- Start Overlay (Appears when an exercise is clicked if camera isn't running yet) -->
+  <div id="start-overlay">
+    <div class="start-card">
+      <div class="start-icon">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
+          <circle cx="12" cy="5" r="3"></circle>
+          <path d="M4 17l6-5 4 4 6-6"></path>
+          <path d="M4 22h16"></path>
+        </svg>
+      </div>
+      <h2 id="overlay-title">AI Push-Up Coach</h2>
+      <p id="overlay-desc" style="color:#94a3b8; font-size:14px; line-height:1.5;">
+        Tracks full-body 3D joints and verifies horizontal plank orientation, grounded wrists, and shoulder descent before counting reps.
+      </p>
+      <button class="start-btn" id="start-btn" type="button">Start Workout Camera</button>
+      <button class="secondary-back-btn" id="overlay-back-btn" type="button">← Back to Exercise List</button>
+      <div id="debug-text" style="font-size:12px; color:#94a3b8; font-family:monospace;">
+        Place phone on floor or stand ~5–8 feet away
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       MODAL 1: USER ACCOUNT & SIGN OUT
+       ========================================================= -->
+  <div class="modal-backdrop" id="account-modal">
+    <div class="modal-sheet">
+      <div class="modal-top">
+        <span class="modal-title">Your Account</span>
+        <button type="button" class="close-modal-btn" id="close-account-modal">✕</button>
+      </div>
+
+      <div class="install-step" style="display:flex; align-items:center; gap:12px;">
+        <div class="account-avatar" id="modal-avatar" style="width:44px; height:44px; font-size:16px;">G</div>
+        <div style="min-width:0;">
+          <div id="modal-user-name" style="font-weight:800; font-size:15px; color:#fff;">Guest User</div>
+          <div id="modal-user-email" style="font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis;">guest@local</div>
+        </div>
+      </div>
+
+      <div class="install-step" style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="color:var(--text-muted); font-weight:600;">Saved Total Reps</span>
+        <strong id="modal-user-reps" style="color:var(--accent); font-size:16px; font-family:monospace;">0</strong>
+      </div>
+
+      <button type="button" class="secondary-back-btn" id="clear-user-reps-btn">Reset Saved Rep History</button>
+      <button type="button" class="danger-btn" id="sign-out-btn">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       MODAL 1B: GOOGLE SIGN-IN CLIENT ID SETUP
+       ========================================================= -->
+  <div class="modal-backdrop" id="google-setup-modal">
+    <div class="modal-sheet">
+      <div class="modal-top">
+        <span class="modal-title">Connect Google Sign-In</span>
+        <button type="button" class="close-modal-btn" id="close-google-setup-modal">✕</button>
+      </div>
+      <p style="font-size:13px; color:var(--text-muted); line-height:1.45;">
+        Google OAuth requires a free Web Client ID linked to your hosted URL (e.g. your Tiiny Host or GitHub Pages domain).
+      </p>
+      <div class="install-step">
+        <strong style="color:var(--accent);">Quick Setup (Google Cloud Console):</strong><br>
+        1. Go to <strong>APIs &amp; Services → Credentials → Create OAuth Client ID (Web)</strong>.<br>
+        2. Add your hosted site origin under <strong>Authorized JavaScript origins</strong>.<br>
+        3. Paste the Client ID below (or set <code>GOOGLE_CLIENT_ID</code> in <code>index.html</code>).
+      </div>
+      <div class="form-group">
+        <label for="google-client-id-input">Google OAuth Web Client ID</label>
+        <input id="google-client-id-input" class="form-input" type="text" placeholder="1234567890-xxxx.apps.googleusercontent.com">
+      </div>
+      <button type="button" class="start-btn" id="save-google-client-id-btn">Save &amp; Continue with Google</button>
+      <button type="button" class="secondary-back-btn" id="demo-google-login-btn">Preview with Demo Google Account</button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       MODAL 2: ADD CUSTOM EXERCISE TO LIST
+       ========================================================= -->
+  <div class="modal-backdrop" id="add-exercise-modal">
+    <div class="modal-sheet">
+      <div class="modal-top">
+        <span class="modal-title">Add New Exercise</span>
+        <button type="button" class="close-modal-btn" id="close-add-modal">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label for="custom-ex-name">Exercise Name</label>
+        <input id="custom-ex-name" class="form-input" type="text" placeholder="e.g. Pike Push-Ups or Split Squats">
+      </div>
+
+      <div class="form-row-2">
+        <div class="form-group">
+          <label for="custom-ex-cat">Category</label>
+          <select id="custom-ex-cat" class="form-select">
+            <option value="Upper Body">Upper Body</option>
+            <option value="Lower Body">Lower Body</option>
+            <option value="Core">Core</option>
+            <option value="Custom" selected>Custom</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="custom-ex-posture">Body Stance Gate</label>
+          <select id="custom-ex-posture" class="form-select">
+            <option value="plank">Floor Plank (Horizontal)</option>
+            <option value="standing" selected>Standing (Upright)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="custom-ex-joint">Primary Tracked Joint</label>
+        <select id="custom-ex-joint" class="form-select">
+          <option value="elbow">Elbow Angle (Shoulder-Elbow-Wrist)</option>
+          <option value="knee" selected>Knee Angle (Hip-Knee-Ankle)</option>
+          <option value="hip">Hip Angle (Shoulder-Hip-Knee)</option>
+        </select>
+      </div>
+
+      <div class="form-row-2">
+        <div class="form-group">
+          <label for="custom-ex-down">Target Down Angle (°)</label>
+          <input id="custom-ex-down" class="form-input" type="number" min="40" max="140" value="90">
+        </div>
+        <div class="form-group">
+          <label for="custom-ex-up">Return Top Angle (°)</label>
+          <input id="custom-ex-up" class="form-input" type="number" min="135" max="178" value="160">
+        </div>
+      </div>
+
+      <button type="button" class="start-btn" id="save-custom-ex-btn">Add to Exercise List</button>
+    </div>
+  </div>
+
+  <div id="toast-banner">Saved!</div>
+
+  <script>
+    // =========================================================
+    // 1. INLINE PWA MANIFEST & SERVICE WORKER SETUP
+    // =========================================================
+    // Auth & Storage Keys
+    // Paste your Google Cloud OAuth 2.0 Web Client ID below for one-tap Google Sign-In across all devices:
+    const DEFAULT_GOOGLE_CLIENT_ID = '741933818373-bh7oij9dlmkd7nbtajqh9a02srj4lg5m.apps.googleusercontent.com';
+    const AUTH_USERS_KEY = 'fitguard_users_v1';
+    const AUTH_SESSION_KEY = 'fitguard_session_v1';
+    const GOOGLE_CLIENT_ID_STORAGE_KEY = 'fitguard_google_client_id_v1';
+
+    function initDownloadablePWA() {
+      try {
+        // Generate SVG App Icon Data URI
+        const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#0284c7"/>
+              <stop offset="100%" stop-color="#6366f1"/>
+            </linearGradient>
+          </defs>
+          <rect width="512" height="512" rx="115" fill="#090d16"/>
+          <rect x="36" y="36" width="440" height="440" rx="95" fill="url(#g)"/>
+          <circle cx="256" cy="135" r="46" fill="#ffffff"/>
+          <path d="M105 350 L215 255 L295 325 L407 205" stroke="#ffffff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          <path d="M95 415 H417" stroke="#38bdf8" stroke-width="28" stroke-linecap="round"/>
+        </svg>`;
+        const iconDataUrl = "data:image/svg+xml;utf8," + encodeURIComponent(iconSvg);
+
+        const appleIcon = document.createElement('link');
+        appleIcon.rel = 'apple-touch-icon';
+        appleIcon.href = iconDataUrl;
+        document.head.appendChild(appleIcon);
+
+        const manifestObj = {
+          name: "FitGuard AI — Workout & Posture Coach",
+          short_name: "FitGuard AI",
+          description: "3D AI Pose Landmarker workout counter and posture analyzer.",
+          start_url: "./",
+          display: "standalone",
+          orientation: "portrait",
+          background_color: "#090d16",
+          theme_color: "#090d16",
+          icons: [
+            { src: iconDataUrl, sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" },
+            { src: iconDataUrl, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" }
+          ]
+        };
+
+        const manifestBlob = new Blob([JSON.stringify(manifestObj)], { type: 'application/manifest+json' });
+        const manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = URL.createObjectURL(manifestBlob);
+        document.head.appendChild(manifestLink);
+
+        if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+          const swCode = `
+            self.addEventListener('install', e => self.skipWaiting());
+            self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+            self.addEventListener('fetch', e => {});
+          `;
+          const swBlob = new Blob([swCode], { type: 'application/javascript' });
+          navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
+        }
+      } catch (e) {}
+    }
+    initDownloadablePWA();
+
+
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast-banner');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    // =========================================================
+    // 2. MODULAR EXERCISE CATALOG (EXTENSIBLE LIST)
+    // =========================================================
+    const DEFAULT_EXERCISES = [
+      {
+        id: 'pushup',
+        name: 'Push-Ups (Side View)',
+        shortLabel: 'Push-Ups',
+        category: 'Upper Body',
+        badge: 'Anti-Cheat Plank Lock',
+        featured: true,
+        stance: 'plank',
+        primaryJoint: 'elbow',
+        downThreshold: 95,
+        upThreshold: 155,
+        primaryLabel: 'Elbow Angle (Arm)',
+        primaryTargetText: 'Target: ≤ 90° (Down)',
+        secondaryLabel: 'Back / Hip Line',
+        secondaryTargetText: 'Target: 160° - 180°',
+        description: 'Tracks full-body plank alignment, grounded wrist stability, and shoulder vertical drop so standing or random movements never false-count.',
+        setupHint: 'Get into a horizontal floor plank facing the camera sideways. Keep head, hips, and heels aligned.',
+        tags: ['Chest & Triceps', '90° Elbow Depth', 'Plank Gate Active']
+      },
+      {
+        id: 'squat',
+        name: 'Bodyweight Squats',
+        shortLabel: 'Squats',
+        category: 'Lower Body',
+        badge: 'Knee & Hip Depth',
+        featured: false,
+        stance: 'standing',
+        primaryJoint: 'knee',
+        downThreshold: 100,
+        upThreshold: 160,
+        primaryLabel: 'Knee Angle (Depth)',
+        primaryTargetText: 'Target: ≤ 95° (Parallel)',
+        secondaryLabel: 'Hip / Torso Posture',
+        secondaryTargetText: 'Target: ≥ 145° Upright',
+        description: 'Measures knee flexion to parallel depth while verifying upright torso posture and planted ankles.',
+        setupHint: 'Stand sideways to the camera with feet shoulder-width apart. Lower hips until thighs are parallel.',
+        tags: ['Quads & Glutes', 'Parallel Depth', 'Upright Spine']
+      },
+      {
+        id: 'plank',
+        name: 'Isometric Plank Hold',
+        shortLabel: 'Plank Secs',
+        category: 'Core',
+        badge: 'Core Stability Timer',
+        featured: false,
+        stance: 'plank',
+        primaryJoint: 'plank_timer',
+        downThreshold: 160,
+        upThreshold: 180,
+        primaryLabel: 'Spine Alignment',
+        primaryTargetText: 'Target: 160° - 180°',
+        secondaryLabel: 'Shoulder / Elbow Support',
+        secondaryTargetText: 'Target: 75° - 110°',
+        description: 'Counts active seconds only while your body maintains a strict horizontal plank without hip sagging or piking.',
+        setupHint: 'Hold a straight floor plank sideways to the camera. Timer pauses automatically if hips sag.',
+        tags: ['Core Endurance', 'Auto-Pause Timer', 'Spine Guard']
+      },
+      {
+        id: 'curl',
+        name: 'Standing Bicep Curls',
+        shortLabel: 'Bicep Curls',
+        category: 'Upper Body',
+        badge: 'Anti-Swing Isolation',
+        featured: false,
+        stance: 'standing',
+        primaryJoint: 'elbow_curl',
+        downThreshold: 60,
+        upThreshold: 150,
+        primaryLabel: 'Elbow Flexion',
+        primaryTargetText: 'Target: ≤ 55° (Top)',
+        secondaryLabel: 'Torso Stability',
+        secondaryTargetText: 'Target: 165° - 180°',
+        description: 'Tracks full range of elbow flexion from full extension to peak contraction while checking for torso swing.',
+        setupHint: 'Stand sideways holding weights or hands in view. Keep elbows pinned by your ribs.',
+        tags: ['Biceps', 'Full Extension', 'Pinned Elbows']
+      },
+      {
+        id: 'lunge',
+        name: 'Forward Lunges',
+        shortLabel: 'Lunges',
+        category: 'Lower Body',
+        badge: 'Balance & Knee Angle',
+        featured: false,
+        stance: 'standing',
+        primaryJoint: 'knee',
+        downThreshold: 100,
+        upThreshold: 160,
+        primaryLabel: 'Lead Knee Angle',
+        primaryTargetText: 'Target: ≤ 95° (Down)',
+        secondaryLabel: 'Torso Alignment',
+        secondaryTargetText: 'Target: 155° - 180°',
+        description: 'Monitors lead knee 90° bend and vertical torso control during alternating or stationary lunges.',
+        setupHint: 'Step forward in side view and lower your hips until your front knee reaches 90 degrees.',
+        tags: ['Legs & Glutes', '90° Knee Bend', 'Balance Check']
+      }
+    ];
+
+    let exercises = [...DEFAULT_EXERCISES];
+    try {
+      const savedCustom = JSON.parse(localStorage.getItem('fitguard_custom_exercises') || '[]');
+      if (Array.isArray(savedCustom) && savedCustom.length > 0) {
+        exercises = [...DEFAULT_EXERCISES, ...savedCustom];
+      }
+    } catch (e) {}
+
+    let sessionRepHistory = {};
+    let activeCategory = 'all';
+    let currentExercise = exercises[0];
+
+    // DOM Elements
+    const exerciseMenu = document.getElementById('exercise-menu');
+    const exerciseListEl = document.getElementById('exercise-list');
+    const categoryTabs = document.getElementById('category-tabs');
+    const hubTotalReps = document.getElementById('hub-total-reps');
+    const hubExerciseCount = document.getElementById('hub-exercise-count');
+
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const startOverlay = document.getElementById('start-overlay');
+    const startBtn = document.getElementById('start-btn');
+    const overlayBackBtn = document.getElementById('overlay-back-btn');
+    const backToListBtn = document.getElementById('back-to-list-btn');
+    const flipBtn = document.getElementById('flip-btn');
+    const soundBtn = document.getElementById('sound-btn');
+    const resetRepsBtn = document.getElementById('reset-reps-btn');
+    const skeletonBtn = document.getElementById('skeleton-btn');
+
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const fpsEl = document.getElementById('fps');
+    const repLabel = document.getElementById('rep-label');
+    const repVal = document.getElementById('rep-val');
+    const stageVal = document.getElementById('stage-val');
+    const guardStateEl = document.getElementById('guard-state');
+    const activeExerciseTitle = document.getElementById('active-exercise-title');
+    const formVerdict = document.getElementById('form-verdict');
+    const feedbackText = document.getElementById('feedback-text');
+
+    const labelPrimaryAngle = document.getElementById('label-primary-angle');
+    const targetPrimaryAngle = document.getElementById('target-primary-angle');
+    const labelSecondaryAngle = document.getElementById('label-secondary-angle');
+    const targetSecondaryAngle = document.getElementById('target-secondary-angle');
+    const valElbow = document.getElementById('val-elbow');
+    const valBack = document.getElementById('val-back');
+    const barElbow = document.getElementById('bar-elbow');
+    const barBack = document.getElementById('bar-back');
+
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayDesc = document.getElementById('overlay-desc');
+
+    let poseLandmarker = null;
+    let stream = null;
+    let facingMode = 'environment';
+    let showSkeleton = true;
+    let voiceCoachEnabled = true;
+    let isWorkoutViewActive = false;
+
+    // =========================================================
+    // 3. RENDER CLICKABLE EXERCISE LIST & SWITCHING
+    // =========================================================
+    function renderExerciseList() {
+      hubExerciseCount.textContent = exercises.length;
+      const totalReps = Object.values(sessionRepHistory).reduce((a, b) => a + b, 0);
+      hubTotalReps.textContent = totalReps;
+
+      const filtered = activeCategory === 'all'
+        ? exercises
+        : exercises.filter(ex => ex.category === activeCategory);
+
+      exerciseListEl.innerHTML = '';
+
+      filtered.forEach(ex => {
+        const doneReps = sessionRepHistory[ex.id] || 0;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `exercise-card ${ex.featured ? 'featured' : ''}`;
+        card.setAttribute('data-exercise-id', ex.id);
+
+        const tagsHtml = (ex.tags || []).map(t => `<span class="ex-tag">${t}</span>`).join('');
+        const repBadgeText = doneReps > 0 ? `${doneReps} ${ex.primaryJoint === 'plank_timer' ? 's' : 'reps'} logged` : ex.badge;
+
+        card.innerHTML = `
+          <div class="ex-card-top">
+            <div class="ex-icon-wrap">
+              ${getExerciseIconSvg(ex.stance, ex.primaryJoint)}
+            </div>
+            <div class="ex-info">
+              <div class="ex-title-row">
+                <span class="ex-title">${ex.name}</span>
+                <span class="ex-badge">${repBadgeText}</span>
+              </div>
+              <p class="ex-desc">${ex.description}</p>
+            </div>
+          </div>
+          <div class="ex-metrics-row">
+            <div class="ex-tags">${tagsHtml}</div>
+            <span class="ex-start-cta">
+              Start ${ex.shortLabel}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </span>
+          </div>
+        `;
+
+        card.addEventListener('click', () => selectExerciseFromList(ex.id));
+        exerciseListEl.appendChild(card);
+      });
+    }
+
+    function getExerciseIconSvg(stance, joint) {
+      if (stance === 'plank') {
+        return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+          <circle cx="19" cy="10" r="2.2"></circle>
+          <path d="M3 17l11-4 4 4"></path>
+          <path d="M16 13l2 5"></path>
+          <path d="M2 20h20"></path>
+        </svg>`;
+      }
+      if (joint === 'elbow_curl') {
+        return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+          <path d="M7 18v-6a5 5 0 0 1 10 0v6"></path>
+          <circle cx="12" cy="5" r="2.5"></circle>
+          <path d="M5 14h14"></path>
+        </svg>`;
+      }
+      return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1">
+        <circle cx="12" cy="4.5" r="2.3"></circle>
+        <path d="M9 9h6l-1.5 5 3 6"></path>
+        <path d="M10.5 14L7.5 20"></path>
+      </svg>`;
+    }
+
+    function selectExerciseFromList(exerciseId) {
+      const found = exercises.find(e => e.id === exerciseId) || exercises[0];
+      currentExercise = found;
+
+      // Reset workout state machine for selected exercise
+      resetWorkoutStateMachine();
+      repCount = sessionRepHistory[currentExercise.id] || 0;
+      repVal.textContent = repCount;
+
+      // Update HUD Labels for this exercise
+      repLabel.textContent = currentExercise.shortLabel;
+      activeExerciseTitle.textContent = currentExercise.name;
+      labelPrimaryAngle.textContent = currentExercise.primaryLabel;
+      targetPrimaryAngle.textContent = currentExercise.primaryTargetText;
+      labelSecondaryAngle.textContent = currentExercise.secondaryLabel;
+      targetSecondaryAngle.textContent = currentExercise.secondaryTargetText;
+      feedbackText.textContent = currentExercise.setupHint;
+      stageVal.textContent = "WAITING STANCE";
+      guardStateEl.textContent = currentExercise.stance === 'plank' ? "Requires Floor Plank" : "Requires Upright Stance";
+      guardStateEl.className = "guard-state";
+
+      overlayTitle.textContent = `AI ${currentExercise.shortLabel} Coach`;
+      overlayDesc.textContent = currentExercise.description;
+
+      // Hide Exercise List Menu
+      exerciseMenu.style.display = 'none';
+      isWorkoutViewActive = true;
+
+      // If camera stream is already running, go straight into live tracking; otherwise show start camera overlay
+      if (stream && stream.active) {
+        startOverlay.style.display = 'none';
+        speak(`${currentExercise.shortLabel} selected.`);
+      } else {
+        startOverlay.style.display = 'flex';
+      }
+    }
+
+    function openExerciseMenu() {
+      isWorkoutViewActive = false;
+      startOverlay.style.display = 'none';
+      exerciseMenu.style.display = 'flex';
+      renderExerciseList();
+    }
+
+    // Category Filter Handler
+    categoryTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cat-tab');
+      if (!btn) return;
+      document.querySelectorAll('.cat-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeCategory = btn.getAttribute('data-cat');
+      renderExerciseList();
+    });
+
+    // =========================================================
+    // 4. STRICT BIOMECHANICAL STATE MACHINE (ANTI-FALSE-COUNT)
+    // =========================================================
+    let repCount = 0;
+    let pushupStage = 'UP'; // 'UP', 'DESCENDING', 'DOWN'
+    let lastRepTime = 0;
+    let repStartTime = 0;
+    let minPrimaryAngleReached = 180;
+    let maxPrimaryAngleReached = 0;
+    let isPostureValidDuringRep = true;
+
+    // Anti-cheat smoothing & confirmation counters
+    let smoothPrimaryAngle = null;
+    let smoothSecondaryAngle = null;
+    let smoothKneeAngle = null;
+    let stanceValidFrames = 0;
+    let bottomHoldFrames = 0;
+    let topShoulderY = null;
+    let maxShoulderDescent = 0;
+    let prevWristPos = null;
+    let lastPlankTickTime = 0;
+
+    function resetWorkoutStateMachine() {
+      pushupStage = 'UP';
+      minPrimaryAngleReached = 180;
+      maxPrimaryAngleReached = 0;
+      isPostureValidDuringRep = true;
+      smoothPrimaryAngle = null;
+      smoothSecondaryAngle = null;
+      smoothKneeAngle = null;
+      stanceValidFrames = 0;
+      bottomHoldFrames = 0;
+      topShoulderY = null;
+      maxShoulderDescent = 0;
+      prevWristPos = null;
+      repStartTime = 0;
+      lastPlankTickTime = performance.now();
+    }
+
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let lastVideoTime = -1;
+
+    // Angle calculation: Angle at vertex B between segment BA and BC
+    function calculateAngle(A, B, C) {
+      if (!A || !B || !C) return 0;
+      const radians = Math.atan2(C.y - B.y, C.x - B.x) - Math.atan2(A.y - B.y, A.x - B.x);
+      let angle = Math.abs(radians * 180.0 / Math.PI);
+      if (angle > 180.0) angle = 360.0 - angle;
+      return Math.round(angle);
+    }
+
+    function ema(prev, current, alpha = 0.38) {
+      if (prev === null || Number.isNaN(prev)) return current;
+      return Math.round(prev * (1 - alpha) + current * alpha);
+    }
+
+    // Voice Coach
+    function speak(text) {
+      if (!voiceCoachEnabled || !('speechSynthesis' in window)) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.1;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {}
+    }
+
+    async function startCamera() {
+      startBtn.disabled = true;
+      startBtn.textContent = "Starting Camera...";
+
+      try {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+
+        const constraints = [
+          { video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+          { video: { facingMode: facingMode } },
+          { video: true }
+        ];
+
+        for (const c of constraints) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia(c);
+            break;
+          } catch (e) {}
+        }
+
+        if (!stream) throw new Error("Could not access camera.");
+
+        video.srcObject = stream;
+        if (facingMode === 'user') {
+          video.classList.remove('environment');
+          canvas.classList.remove('environment');
+        } else {
+          video.classList.add('environment');
+          canvas.classList.add('environment');
+        }
+
+        await new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resolve();
+          };
+        });
+
+        startOverlay.style.display = 'none';
+        startBtn.disabled = false;
+        startBtn.textContent = "Start Workout Camera";
+        statusText.textContent = "Camera Ready";
+        statusDot.className = "status-dot active";
+
+        requestAnimationFrame(renderLoop);
+        if (!poseLandmarker) {
+          initPoseAI();
+        }
+      } catch (err) {
+        showToast("Camera access needed: " + err.message);
+        startBtn.disabled = false;
+        startBtn.textContent = "Retry Starting Camera";
+      }
+    }
+
+    async function initPoseAI() {
+      statusText.textContent = "Loading Pose AI...";
+      try {
+        if (!window.MediaPipeVision) {
+          await new Promise((resolve) => {
+            window.addEventListener('mediapipe-ready', resolve, { once: true });
+            setTimeout(resolve, 3000);
+          });
+        }
+
+        const { PoseLandmarker, FilesetResolver } = window.MediaPipeVision || {};
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+
+        try {
+          poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+              delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numPoses: 1
+          });
+        } catch (gpuError) {
+          poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+              delegate: "CPU"
+            },
+            runningMode: "VIDEO",
+            numPoses: 1
+          });
+        }
+
+        statusText.textContent = "AI Ready! Step into frame";
+        speak(`${currentExercise.shortLabel} ready. Step into side view.`);
+      } catch (e) {
+        statusText.textContent = "AI Load Failed";
+      }
+    }
+
+    // Main Detection & Evaluation Loop
+    function renderLoop(currentTime) {
+      frameCount++;
+      if (currentTime - lastFpsTime >= 1000) {
+        fpsEl.textContent = `${Math.round((frameCount * 1000) / (currentTime - lastFpsTime))} FPS`;
+        frameCount = 0;
+        lastFpsTime = currentTime;
+      }
+
+      if (video.videoWidth && (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight)) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (isWorkoutViewActive && poseLandmarker && video.currentTime !== lastVideoTime && video.readyState >= 2) {
+        lastVideoTime = video.currentTime;
+        const results = poseLandmarker.detectForVideo(video, performance.now());
+
+        if (results && results.landmarks && results.landmarks.length > 0) {
+          const landmarks = results.landmarks[0];
+          statusDot.className = "status-dot active";
+          statusText.textContent = "Body Tracked";
+
+          analyzeExercise(landmarks);
+          if (showSkeleton) drawSkeleton(landmarks);
+        } else {
+          stanceValidFrames = 0;
+          statusDot.className = "status-dot";
+          statusText.textContent = "Searching for full body...";
+          guardStateEl.textContent = "Body Not in Frame";
+          guardStateEl.className = "guard-state";
+          feedbackText.textContent = "Ensure your full body (head to feet) is visible from the side.";
+        }
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    // =========================================================
+    // 5. MULTI-GATE EXERCISE & PUSH-UP ANALYZER
+    // =========================================================
+    function analyzeExercise(lm) {
+      const leftVis = ((lm[11].visibility || 0) + (lm[13].visibility || 0) + (lm[23].visibility || 0) + (lm[27].visibility || 0)) / 4;
+      const rightVis = ((lm[12].visibility || 0) + (lm[14].visibility || 0) + (lm[24].visibility || 0) + (lm[28].visibility || 0)) / 4;
+      const isLeft = leftVis >= rightVis;
+
+      const shoulder = isLeft ? lm[11] : lm[12];
+      const elbow = isLeft ? lm[13] : lm[14];
+      const wrist = isLeft ? lm[15] : lm[16];
+      const hip = isLeft ? lm[23] : lm[24];
+      const knee = isLeft ? lm[25] : lm[26];
+      const ankle = isLeft ? lm[27] : lm[28];
+
+      // GATE 1: Landmark Visibility Confidence Check
+      // Prevents false counting when walking into frame, crouching close to phone, or partially occluded
+      const minCoreVis = Math.min(
+        shoulder.visibility || 0,
+        elbow.visibility || 0,
+        wrist.visibility || 0,
+        hip.visibility || 0,
+        knee.visibility || 0
+      );
+
+      if (minCoreVis < 0.62) {
+        stanceValidFrames = 0;
+        bottomHoldFrames = 0;
+        guardStateEl.textContent = "Low Joint Visibility";
+        guardStateEl.className = "guard-state";
+        stageVal.textContent = "STEP BACK";
+        formVerdict.textContent = "Adjust Camera";
+        formVerdict.className = "form-verdict warning";
+        feedbackText.textContent = "Step back so your shoulders, arms, hips, and legs are clearly in frame.";
+        return;
+      }
+
+      // Raw Joint Angles & EMA Smoothing
+      const rawElbow = calculateAngle(shoulder, elbow, wrist);
+      const rawBack = calculateAngle(shoulder, hip, ankle);
+      const rawKnee = calculateAngle(hip, knee, ankle);
+      const rawHip = calculateAngle(shoulder, hip, knee);
+
+      smoothPrimaryAngle = ema(smoothPrimaryAngle,
+        currentExercise.primaryJoint === 'knee' ? rawKnee :
+        currentExercise.primaryJoint === 'hip' ? rawHip :
+        currentExercise.primaryJoint === 'plank_timer' ? rawBack : rawElbow
+      );
+      smoothSecondaryAngle = ema(smoothSecondaryAngle,
+        currentExercise.primaryJoint === 'plank_timer' ? rawElbow : rawBack
+      );
+      smoothKneeAngle = ema(smoothKneeAngle, rawKnee);
+
+      // Measure Body Orientation Angle relative to horizontal floor (0° = flat horizontal plank, 90° = vertical standing)
+      const bodyDx = Math.abs(shoulder.x - ankle.x);
+      const bodyDy = Math.abs(shoulder.y - ankle.y);
+      const bodyInclineDeg = Math.round(Math.atan2(bodyDy, Math.max(0.001, bodyDx)) * (180 / Math.PI));
+
+      // Measure Wrist Movement Velocity (hands planted vs waving arms)
+      let wristMoveDelta = 0;
+      if (prevWristPos) {
+        wristMoveDelta = Math.hypot(wrist.x - prevWristPos.x, wrist.y - prevWristPos.y);
+      }
+      prevWristPos = { x: wrist.x, y: wrist.y };
+
+      // Route to Dedicated Push-Up Anti-Cheat Analyzer or General Exercise Analyzer
+      if (currentExercise.id === 'pushup' || (currentExercise.stance === 'plank' && currentExercise.primaryJoint === 'elbow')) {
+        analyzeStrictPushup({
+          shoulder, elbow, wrist, hip, knee, ankle,
+          elbowAngle: smoothPrimaryAngle,
+          backAngle: smoothSecondaryAngle,
+          kneeAngle: smoothKneeAngle,
+          bodyInclineDeg,
+          wristMoveDelta
+        });
+      } else if (currentExercise.primaryJoint === 'plank_timer') {
+        analyzePlankHold({
+          shoulder, hip, ankle,
+          backAngle: smoothPrimaryAngle,
+          elbowAngle: smoothSecondaryAngle,
+          kneeAngle: smoothKneeAngle,
+          bodyInclineDeg
+        });
+      } else {
+        analyzeStandingExercise({
+          primaryAngle: smoothPrimaryAngle,
+          secondaryAngle: smoothSecondaryAngle,
+          bodyInclineDeg
+        });
+      }
+    }
+
+    // Dedicated Strict Push-Up Analyzer (Fixes false counts from non-pushup movements)
+    function analyzeStrictPushup(data) {
+      const {
+        shoulder, wrist, hip, ankle,
+        elbowAngle, backAngle, kneeAngle,
+        bodyInclineDeg, wristMoveDelta
+      } = data;
+
+      // Update UI Telemetry Numbers
+      valElbow.textContent = `${elbowAngle}°`;
+      valBack.textContent = `${backAngle}°`;
+      barElbow.style.width = `${Math.min(100, Math.max(0, (180 - elbowAngle) / 90 * 100))}%`;
+      barBack.style.width = `${Math.min(100, Math.max(0, (backAngle / 180) * 100))}%`;
+
+      // GATE 2: Horizontal Plank Orientation + Grounded Wrists Check
+      // In a real push-up:
+      // 1) Body incline relative to floor is horizontal/low-incline (<= 42°), NEVER vertical standing (> 45°).
+      // 2) Wrists are on the floor below or near shoulder level (wrist.y >= shoulder.y - 0.04).
+      // 3) Legs are extended (kneeAngle >= 135°).
+      const isHorizontalPlank = bodyInclineDeg <= 42;
+      const isWristGrounded = wrist.y >= (shoulder.y - 0.04);
+      const isWristPlanted = wristMoveDelta < 0.048;
+      const isLegsExtended = kneeAngle >= 135;
+
+      if (!isHorizontalPlank || !isWristGrounded || !isLegsExtended) {
+        // User is standing, kneeling/sitting, or adjusting phone — block counting completely!
+        stanceValidFrames = 0;
+        bottomHoldFrames = 0;
+        pushupStage = 'UP';
+        topShoulderY = null;
+        maxShoulderDescent = 0;
+
+        guardStateEl.textContent = !isHorizontalPlank
+          ? `Not in Plank (${bodyInclineDeg}° Tilt)`
+          : !isWristGrounded
+          ? "Hands Not on Floor"
+          : "Extend Knees";
+        guardStateEl.className = "guard-state";
+        stageVal.textContent = "STANDBY (NO REP)";
+        formVerdict.textContent = "Waiting for Plank";
+        formVerdict.className = "form-verdict warning";
+        feedbackText.textContent = "Rep counter locked: Get into a horizontal floor plank with hands planted on the ground.";
+        return;
+      }
+
+      // Increment valid horizontal plank frame counter
+      stanceValidFrames++;
+      if (stanceValidFrames < 5) {
+        guardStateEl.textContent = "Locking Plank...";
+        guardStateEl.className = "guard-state";
+        stageVal.textContent = "HOLD PLANK";
+        return;
+      }
+
+      guardStateEl.textContent = "Plank Locked ✓";
+      guardStateEl.className = "guard-state locked";
+
+      // Check Spine Alignment (Shoulder-Hip-Ankle straight line: 155° - 180°)
+      let postureStatus = "GOOD";
+      let feedback = "";
+
+      if (backAngle < 155) {
+        const midY = (shoulder.y + ankle.y) / 2;
+        if (hip.y > midY) {
+          postureStatus = "SAGGING";
+          feedback = "⚠️ Hips sagging! Tighten your core and glutes to keep your spine straight.";
+          isPostureValidDuringRep = false;
+        } else {
+          postureStatus = "PIKING";
+          feedback = "⚠️ Hips too high! Lower your hips into a straight plank line.";
+          isPostureValidDuringRep = false;
+        }
+      } else if (kneeAngle < 150) {
+        postureStatus = "BENT_KNEES";
+        feedback = "⚠️ Straighten your knees to maintain full plank tension.";
+      } else {
+        postureStatus = "GOOD";
+        feedback = "✅ Plank locked & straight! Lower your chest to 90° elbow depth.";
+      }
+
+      if (postureStatus === "GOOD") {
+        formVerdict.textContent = "Good Posture (160°+)";
+        formVerdict.className = "form-verdict";
+      } else {
+        formVerdict.textContent = postureStatus === "SAGGING" ? "Hips Sagging" : postureStatus === "PIKING" ? "Hips Too High" : "Bent Knees";
+        formVerdict.className = "form-verdict danger";
+      }
+      feedbackText.textContent = feedback;
+
+      // GATE 3 & 4: Push-Up State Machine with Shoulder Vertical Travel & Frame Dwell
+      const downTarget = currentExercise.downThreshold || 95;
+      const upTarget = currentExercise.upThreshold || 155;
+      const now = performance.now();
+
+      if (elbowAngle >= upTarget) {
+        // At TOP of Plank
+        if (pushupStage === 'DOWN') {
+          const repDuration = now - repStartTime;
+          const cooldownPassed = (now - lastRepTime) >= 650;
+          // Verify shoulders actually lowered toward the wrists during the rep (at least 0.032 normalized screen travel)
+          const hasRealShoulderDrop = maxShoulderDescent >= 0.030;
+
+          if (
+            minPrimaryAngleReached <= downTarget &&
+            bottomHoldFrames >= 2 &&
+            hasRealShoulderDrop &&
+            repDuration >= 400 &&
+            repDuration <= 7000 &&
+            cooldownPassed
+          ) {
+            if (isPostureValidDuringRep) {
+              repCount++;
+              sessionRepHistory[currentExercise.id] = repCount;
+              saveUserWorkoutData();
+              repVal.textContent = repCount;
+              lastRepTime = now;
+              speak(`${repCount}`);
+              feedbackText.textContent = `✅ Clean Push-Up #${repCount}! Full ${minPrimaryAngleReached}° depth & straight back.`;
+            } else {
+              feedbackText.textContent = "⚠️ Rep ignored: Keep your hips aligned with your spine throughout the push-up.";
+              speak("Keep your back straight");
+            }
+          } else if (!hasRealShoulderDrop) {
+            feedbackText.textContent = "⚠️ Arm movement ignored: Lower your chest and shoulders toward the floor.";
+          } else if (minPrimaryAngleReached > downTarget) {
+            feedbackText.textContent = `⚠️ Incomplete depth (${minPrimaryAngleReached}°). Lower chest to ≤ ${downTarget}°.`;
+            speak("Go deeper");
+          }
+        }
+
+        pushupStage = 'UP';
+        stageVal.textContent = "TOP / PLANK";
+        minPrimaryAngleReached = 180;
+        bottomHoldFrames = 0;
+        isPostureValidDuringRep = true;
+        topShoulderY = shoulder.y;
+        maxShoulderDescent = 0;
+      } else if (elbowAngle <= downTarget + 5) {
+        // At BOTTOM of Push-Up
+        if (pushupStage === 'UP') {
+          repStartTime = now;
+          if (topShoulderY === null) topShoulderY = shoulder.y;
+        }
+        if (isWristPlanted) {
+          pushupStage = 'DOWN';
+          bottomHoldFrames++;
+          stageVal.textContent = `CHEST DOWN (${elbowAngle}°)`;
+          minPrimaryAngleReached = Math.min(minPrimaryAngleReached, elbowAngle);
+          if (topShoulderY !== null) {
+            maxShoulderDescent = Math.max(maxShoulderDescent, shoulder.y - topShoulderY);
+          }
+        }
+      } else {
+        // Transitioning (Descending or Ascending)
+        if (pushupStage === 'UP' && elbowAngle < 142 && isWristPlanted) {
+          if (repStartTime === 0) repStartTime = now;
+          if (topShoulderY === null) topShoulderY = shoulder.y;
+          stageVal.textContent = "DESCENDING...";
+        } else if (pushupStage === 'DOWN') {
+          stageVal.textContent = "PUSHING UP...";
+        }
+        minPrimaryAngleReached = Math.min(minPrimaryAngleReached, elbowAngle);
+        if (topShoulderY !== null) {
+          maxShoulderDescent = Math.max(maxShoulderDescent, shoulder.y - topShoulderY);
+        }
+      }
+    }
+
+    // Isometric Plank Hold Timer Analyzer
+    function analyzePlankHold(data) {
+      const { backAngle, elbowAngle, kneeAngle, bodyInclineDeg } = data;
+      valElbow.textContent = `${backAngle}°`;
+      valBack.textContent = `${elbowAngle}°`;
+      barElbow.style.width = `${Math.min(100, Math.max(0, (backAngle / 180) * 100))}%`;
+      barBack.style.width = `${Math.min(100, Math.max(0, (elbowAngle / 180) * 100))}%`;
+
+      const isHorizontal = bodyInclineDeg <= 42 && kneeAngle >= 140;
+      const isSpineStraight = backAngle >= 158;
+
+      if (isHorizontal && isSpineStraight) {
+        guardStateEl.textContent = "Plank Active ✓";
+        guardStateEl.className = "guard-state locked";
+        stageVal.textContent = "HOLDING";
+        formVerdict.textContent = "Solid Plank";
+        formVerdict.className = "form-verdict";
+        feedbackText.textContent = "✅ Great core tension! Keep holding your spine straight.";
+
+        const now = performance.now();
+        if (now - lastPlankTickTime >= 1000) {
+          repCount++;
+          sessionRepHistory[currentExercise.id] = repCount;
+          saveUserWorkoutData();
+          repVal.textContent = repCount;
+          lastPlankTickTime = now;
+          if (repCount % 10 === 0) speak(`${repCount} seconds`);
+        }
+      } else {
+        lastPlankTickTime = performance.now();
+        guardStateEl.textContent = isHorizontal ? "Fix Spine Line" : "Get Into Plank";
+        guardStateEl.className = "guard-state";
+        stageVal.textContent = "TIMER PAUSED";
+        formVerdict.textContent = isHorizontal ? "Hips Out of Line" : "Standby";
+        formVerdict.className = "form-verdict warning";
+        feedbackText.textContent = isHorizontal
+          ? "⚠️ Align your shoulders, hips, and ankles to resume plank timer."
+          : "Get into a horizontal floor plank to start counting hold seconds.";
+      }
+    }
+
+    // Upright Standing Exercises Analyzer (Squats, Lunges, Bicep Curls, Custom Standing)
+    function analyzeStandingExercise(data) {
+      const { primaryAngle, secondaryAngle, bodyInclineDeg } = data;
+      valElbow.textContent = `${primaryAngle}°`;
+      valBack.textContent = `${secondaryAngle}°`;
+      barElbow.style.width = `${Math.min(100, Math.max(0, (180 - primaryAngle) / 100 * 100))}%`;
+      barBack.style.width = `${Math.min(100, Math.max(0, (secondaryAngle / 180) * 100))}%`;
+
+      // Require upright stance (bodyInclineDeg >= 52°) so lying down or bending over for phone doesn't count
+      if (bodyInclineDeg < 52) {
+        stanceValidFrames = 0;
+        bottomHoldFrames = 0;
+        guardStateEl.textContent = "Stand Upright";
+        guardStateEl.className = "guard-state";
+        stageVal.textContent = "STANDBY";
+        formVerdict.textContent = "Not Upright";
+        formVerdict.className = "form-verdict warning";
+        feedbackText.textContent = `Stand upright facing sideways so ${currentExercise.shortLabel} tracking can lock on.`;
+        return;
+      }
+
+      stanceValidFrames++;
+      if (stanceValidFrames < 5) return;
+
+      guardStateEl.textContent = "Stance Locked ✓";
+      guardStateEl.className = "guard-state locked";
+
+      const downTarget = currentExercise.downThreshold || 100;
+      const upTarget = currentExercise.upThreshold || 158;
+      const now = performance.now();
+
+      if (secondaryAngle >= 145) {
+        formVerdict.textContent = "Good Posture";
+        formVerdict.className = "form-verdict";
+      } else {
+        formVerdict.textContent = "Keep Torso Tall";
+        formVerdict.className = "form-verdict warning";
+      }
+
+      if (primaryAngle >= upTarget) {
+        if (pushupStage === 'DOWN' && minPrimaryAngleReached <= downTarget && bottomHoldFrames >= 2 && (now - lastRepTime) >= 600) {
+          repCount++;
+          sessionRepHistory[currentExercise.id] = repCount;
+          saveUserWorkoutData();
+          repVal.textContent = repCount;
+          lastRepTime = now;
+          speak(`${repCount}`);
+          feedbackText.textContent = `✅ Clean ${currentExercise.shortLabel} Rep #${repCount}! Peak angle: ${minPrimaryAngleReached}°.`;
+        }
+        pushupStage = 'UP';
+        stageVal.textContent = "READY / TOP";
+        minPrimaryAngleReached = 180;
+        bottomHoldFrames = 0;
+      } else if (primaryAngle <= downTarget) {
+        pushupStage = 'DOWN';
+        bottomHoldFrames++;
+        stageVal.textContent = `TARGET REACHED (${primaryAngle}°)`;
+        minPrimaryAngleReached = Math.min(minPrimaryAngleReached, primaryAngle);
+        feedbackText.textContent = "✅ Good depth! Drive back to the starting position.";
+      } else {
+        stageVal.textContent = pushupStage === 'DOWN' ? "RETURNING..." : "IN MOTION...";
+        minPrimaryAngleReached = Math.min(minPrimaryAngleReached, primaryAngle);
+      }
+    }
+
+    // Canvas Skeleton Drawing with Joint Angle Badges
+    function drawSkeleton(lm) {
+      const w = canvas.width;
+      const h = canvas.height;
+
+      const leftVis = ((lm[11].visibility || 1) + (lm[13].visibility || 1) + (lm[23].visibility || 1)) / 3;
+      const rightVis = ((lm[12].visibility || 1) + (lm[14].visibility || 1) + (lm[24].visibility || 1)) / 3;
+      const isLeft = leftVis >= rightVis;
+
+      const connections = [
+        [11, 12],
+        [11, 13], [13, 15],
+        [12, 14], [14, 16],
+        [11, 23], [12, 24],
+        [23, 24],
+        [23, 25], [25, 27],
+        [24, 26], [26, 28]
+      ];
+
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.75)";
+      ctx.lineCap = "round";
+
+      for (const [i, j] of connections) {
+        if (lm[i] && lm[j]) {
+          ctx.beginPath();
+          ctx.moveTo(lm[i].x * w, lm[i].y * h);
+          ctx.lineTo(lm[j].x * w, lm[j].y * h);
+          ctx.stroke();
+        }
+      }
+
+      for (const idx of [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) {
+        const pt = lm[idx];
+        if (pt) {
+          ctx.beginPath();
+          ctx.arc(pt.x * w, pt.y * h, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = "#38bdf8";
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#ffffff";
+          ctx.stroke();
+        }
+      }
+
+      const shoulder = isLeft ? lm[11] : lm[12];
+      const elbow = isLeft ? lm[13] : lm[14];
+      const wrist = isLeft ? lm[15] : lm[16];
+      const hip = isLeft ? lm[23] : lm[24];
+      const knee = isLeft ? lm[25] : lm[26];
+      const ankle = isLeft ? lm[27] : lm[28];
+
+      const elbowAngle = calculateAngle(shoulder, elbow, wrist);
+      const backAngle = calculateAngle(shoulder, hip, ankle);
+      const kneeAngle = calculateAngle(hip, knee, ankle);
+
+      if (currentExercise.primaryJoint === 'knee') {
+        drawAngleBadge(knee.x * w, knee.y * h, `${kneeAngle}°`, kneeAngle <= 100 ? "#10b981" : "#38bdf8");
+      } else {
+        drawAngleBadge(elbow.x * w, elbow.y * h, `${elbowAngle}°`, elbowAngle <= 95 ? "#10b981" : "#38bdf8");
+      }
+      drawAngleBadge(hip.x * w, hip.y * h, `${backAngle}°`, backAngle >= 155 ? "#10b981" : "#ef4444");
+    }
+
+    function drawAngleBadge(x, y, text, color) {
+      ctx.save();
+      ctx.font = "bold 16px monospace";
+      const metrics = ctx.measureText(text);
+      const padding = 6;
+
+      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
+      ctx.beginPath();
+      ctx.roundRect(x + 10, y - 18, metrics.width + padding * 2, 24, 6);
+      ctx.fill();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      ctx.fillText(text, x + 10 + padding, y);
+      ctx.restore();
+    }
+
+    // =========================================================
+    // 6. UI CONTROLS, MODALS & DOWNLOAD HANDLERS
+    // =========================================================
+    startBtn.addEventListener('click', startCamera);
+    overlayBackBtn.addEventListener('click', openExerciseMenu);
+    backToListBtn.addEventListener('click', openExerciseMenu);
+
+    flipBtn.addEventListener('click', () => {
+      facingMode = facingMode === 'user' ? 'environment' : 'user';
+      startCamera();
+    });
+
+    soundBtn.addEventListener('click', () => {
+      voiceCoachEnabled = !voiceCoachEnabled;
+      soundBtn.style.opacity = voiceCoachEnabled ? "1" : "0.5";
+      showToast(voiceCoachEnabled ? "Voice Coach Enabled" : "Voice Coach Muted");
+    });
+
+    resetRepsBtn.addEventListener('click', () => {
+      repCount = 0;
+      sessionRepHistory[currentExercise.id] = 0;
+      saveUserWorkoutData();
+      repVal.textContent = "0";
+      resetWorkoutStateMachine();
+      showToast("Counter Reset");
+    });
+
+    skeletonBtn.addEventListener('click', () => {
+      showSkeleton = !showSkeleton;
+      skeletonBtn.classList.toggle('active', showSkeleton);
+    });
+
+    // =========================================================
+    // 7. WORKING LOGIN / SIGN-UP & PER-USER DATA PERSISTENCE
+    // =========================================================
+    let currentUser = null;
+    let authMode = 'login';
+
+    const authScreen = document.getElementById('auth-screen');
+    const authForm = document.getElementById('auth-form');
+    const authError = document.getElementById('auth-error');
+    const authNameInput = document.getElementById('auth-name');
+    const authEmailInput = document.getElementById('auth-email');
+    const authPasswordInput = document.getElementById('auth-password');
+    const authConfirmInput = document.getElementById('auth-confirm-password');
+    const authRememberInput = document.getElementById('auth-remember');
+    const authSubmitBtn = document.getElementById('auth-submit-btn');
+    const signupNameGroup = document.getElementById('signup-name-group');
+    const signupConfirmGroup = document.getElementById('signup-confirm-group');
+    const togglePwBtn = document.getElementById('toggle-pw-btn');
+
+    const accountModal = document.getElementById('account-modal');
+    const accountAvatarEl = document.getElementById('account-avatar');
+    const accountNameLabelEl = document.getElementById('account-name-label');
+    const modalAvatarEl = document.getElementById('modal-avatar');
+    const modalUserNameEl = document.getElementById('modal-user-name');
+    const modalUserEmailEl = document.getElementById('modal-user-email');
+    const modalUserRepsEl = document.getElementById('modal-user-reps');
+
+    function readUsersStore() {
+      try {
+        const raw = localStorage.getItem(AUTH_USERS_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function writeUsersStore(usersObj) {
+      try {
+        localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(usersObj));
+      } catch (e) {}
+    }
+
+    async function hashPassword(password) {
+      const salted = 'fg_salt_2026_' + password;
+      try {
+        if (window.crypto && window.crypto.subtle) {
+          const buf = new TextEncoder().encode(salted);
+          const digest = await window.crypto.subtle.digest('SHA-256', buf);
+          return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+      } catch (e) {}
+      // Deterministic fallback hash when subtle crypto is unavailable
+      let h = 2166136261;
+      for (let i = 0; i < salted.length; i++) {
+        h ^= salted.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return 'fb_' + (h >>> 0).toString(16);
+    }
+
+    function getInitials(name) {
+      const parts = String(name || 'G').trim().split(/\s+/);
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+
+    function getUserDataKey(email) {
+      return 'fitguard_data_' + String(email || 'guest').toLowerCase();
+    }
+
+    function loadUserWorkoutData() {
+      sessionRepHistory = {};
+      exercises = [...DEFAULT_EXERCISES];
+      if (!currentUser) return;
+      try {
+        const raw = localStorage.getItem(getUserDataKey(currentUser.email));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.reps === 'object') {
+            sessionRepHistory = parsed.reps;
+          }
+          if (parsed && Array.isArray(parsed.customExercises)) {
+            exercises = [...DEFAULT_EXERCISES, ...parsed.customExercises];
+          }
+        }
+      } catch (e) {}
+    }
+
+    function saveUserWorkoutData() {
+      if (!currentUser) return;
+      try {
+        const customExercises = exercises.filter(e => String(e.id).startsWith('custom_'));
+        localStorage.setItem(getUserDataKey(currentUser.email), JSON.stringify({
+          reps: sessionRepHistory,
+          customExercises
+        }));
+      } catch (e) {}
+    }
+
+    function showAuthError(msg) {
+      authError.textContent = msg;
+      authError.classList.add('visible');
+    }
+
+    function clearAuthError() {
+      authError.textContent = '';
+      authError.classList.remove('visible');
+    }
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      clearAuthError();
+      document.querySelectorAll('.auth-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-auth-mode') === mode);
+      });
+      const isSignup = mode === 'signup';
+      signupNameGroup.style.display = isSignup ? 'flex' : 'none';
+      signupConfirmGroup.style.display = isSignup ? 'flex' : 'none';
+      authSubmitBtn.textContent = isSignup ? 'Create Account' : 'Sign In';
+      authPasswordInput.setAttribute('autocomplete', isSignup ? 'new-password' : 'current-password');
+    }
+
+    function setAvatarContent(el, name, pictureUrl) {
+      el.innerHTML = '';
+      if (pictureUrl) {
+        const img = document.createElement('img');
+        img.src = pictureUrl;
+        img.alt = name || 'User';
+        img.referrerPolicy = 'no-referrer';
+        el.appendChild(img);
+      } else {
+        el.textContent = getInitials(name);
+      }
+    }
+
+    function completeLogin(userObj, persistSession) {
+      currentUser = {
+        name: userObj.name,
+        email: userObj.email,
+        picture: userObj.picture || '',
+        provider: userObj.provider || (userObj.isGuest ? 'guest' : 'local'),
+        isGuest: !!userObj.isGuest
+      };
+      try {
+        if (persistSession) {
+          localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(currentUser));
+        } else {
+          sessionStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(currentUser));
+          localStorage.removeItem(AUTH_SESSION_KEY);
+        }
+      } catch (e) {}
+
+      loadUserWorkoutData();
+      const firstName = currentUser.name.split(' ')[0];
+      setAvatarContent(accountAvatarEl, currentUser.name, currentUser.picture);
+      accountNameLabelEl.textContent = firstName;
+      setAvatarContent(modalAvatarEl, currentUser.name, currentUser.picture);
+      modalUserNameEl.textContent = currentUser.name;
+      modalUserEmailEl.textContent = currentUser.isGuest
+        ? 'Guest Session (Local)'
+        : currentUser.provider === 'google'
+        ? `${currentUser.email} • Google Account`
+        : currentUser.email;
+
+      authScreen.style.display = 'none';
+      exerciseMenu.style.display = 'flex';
+      renderExerciseList();
+      showToast(`Welcome, ${firstName}!`);
+    }
+
+    function signOutUser() {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+      isWorkoutViewActive = false;
+      currentUser = null;
+      try {
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+          window.google.accounts.id.disableAutoSelect();
+        }
+      } catch (e) {}
+      try {
+        localStorage.removeItem(AUTH_SESSION_KEY);
+        sessionStorage.removeItem(AUTH_SESSION_KEY);
+      } catch (e) {}
+
+      accountModal.classList.remove('open');
+      startOverlay.style.display = 'none';
+      exerciseMenu.style.display = 'none';
+      authForm.reset();
+      setAuthMode('login');
+      authScreen.style.display = 'flex';
+      showToast("Signed out");
+    }
+
+    document.getElementById('auth-tabs').addEventListener('click', (e) => {
+      const btn = e.target.closest('.auth-tab');
+      if (!btn) return;
+      setAuthMode(btn.getAttribute('data-auth-mode'));
+    });
+
+    togglePwBtn.addEventListener('click', () => {
+      const showing = authPasswordInput.type === 'text';
+      authPasswordInput.type = showing ? 'password' : 'text';
+      togglePwBtn.textContent = showing ? 'Show' : 'Hide';
+    });
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearAuthError();
+
+      const email = authEmailInput.value.trim().toLowerCase();
+      const password = authPasswordInput.value;
+      const remember = authRememberInput.checked;
+
+      if (!email || email.length < 3) {
+        showAuthError("Please enter a valid email or username (at least 3 characters).");
+        return;
+      }
+      if (!password || password.length < 6) {
+        showAuthError("Password must be at least 6 characters long.");
+        return;
+      }
+
+      const users = readUsersStore();
+      const pwHash = await hashPassword(password);
+
+      if (authMode === 'signup') {
+        const fullName = authNameInput.value.trim();
+        const confirmPw = authConfirmInput.value;
+        if (!fullName || fullName.length < 2) {
+          showAuthError("Please enter your full name.");
+          return;
+        }
+        if (password !== confirmPw) {
+          showAuthError("Passwords do not match.");
+          return;
+        }
+        if (users[email]) {
+          showAuthError("An account with this email/username already exists. Try signing in.");
+          return;
+        }
+        users[email] = { name: fullName, email, passwordHash: pwHash, createdAt: Date.now() };
+        writeUsersStore(users);
+        completeLogin(users[email], remember);
+      } else {
+        const existing = users[email];
+        if (!existing) {
+          showAuthError("Account not found. Switch to Create Account to register.");
+          return;
+        }
+        if (existing.passwordHash !== pwHash) {
+          showAuthError("Incorrect password. Please try again.");
+          return;
+        }
+        completeLogin(existing, remember);
+      }
+    });
+
+    document.getElementById('guest-login-btn').addEventListener('click', () => {
+      completeLogin({ name: 'Guest Athlete', email: 'guest', isGuest: true }, false);
+    });
+
+    // =========================================================
+    // 8. GOOGLE ACCOUNT SIGN-IN (GOOGLE IDENTITY SERVICES)
+    // =========================================================
+    const googleSetupModal = document.getElementById('google-setup-modal');
+    const googleClientIdInput = document.getElementById('google-client-id-input');
+
+    function getGoogleClientId() {
+      if (DEFAULT_GOOGLE_CLIENT_ID && DEFAULT_GOOGLE_CLIENT_ID.trim()) {
+        return DEFAULT_GOOGLE_CLIENT_ID.trim();
+      }
+      try {
+        return (localStorage.getItem(GOOGLE_CLIENT_ID_STORAGE_KEY) || '').trim();
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function decodeJwtPayload(token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+          '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        ).join(''));
+        return JSON.parse(jsonPayload);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function isEmbeddedWebView() {
+      const ua = navigator.userAgent || '';
+      return /Instagram|FBAN|FBAV|WhatsApp|Line\/|Snapchat|; wv\)/i.test(ua);
+    }
+
+    function startGoogleSignIn() {
+      clearAuthError();
+      const clientId = getGoogleClientId();
+      if (!clientId) {
+        googleClientIdInput.value = '';
+        googleSetupModal.classList.add('open');
+        return;
+      }
+
+      if (isEmbeddedWebView()) {
+        showAuthError("Google blocks sign-in inside in-app browsers. Tap the menu (⋮) and choose 'Open in Chrome' or Safari.");
+        return;
+      }
+
+      if (!window.google || !window.google.accounts) {
+        showAuthError("Google Sign-In SDK is still loading or blocked offline. Check your connection and try again.");
+        return;
+      }
+
+      try {
+        // Use OAuth2 Token Client (works reliably across mobile & desktop browsers on click)
+        if (window.google.accounts.oauth2) {
+          const tokenClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: 'openid email profile',
+            callback: async (tokenResponse) => {
+              if (tokenResponse.error) {
+                showAuthError("Google Sign-In failed: " + tokenResponse.error);
+                return;
+              }
+              try {
+                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+                });
+                if (!res.ok) throw new Error("Failed to fetch Google profile");
+                const profile = await res.json();
+                completeLogin({
+                  name: profile.name || profile.given_name || 'Google Athlete',
+                  email: profile.email || 'google-user',
+                  picture: profile.picture || '',
+                  provider: 'google',
+                  isGuest: false
+                }, authRememberInput.checked);
+              } catch (err) {
+                showAuthError("Could not load Google profile details. Please try again.");
+              }
+            }
+          });
+          tokenClient.requestAccessToken({ prompt: 'select_account' });
+          return;
+        }
+
+        // Fallback to One Tap / ID Token
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: (response) => {
+            const payload = decodeJwtPayload(response.credential);
+            if (!payload) {
+              showAuthError("Could not verify Google credential.");
+              return;
+            }
+            completeLogin({
+              name: payload.name || 'Google Athlete',
+              email: payload.email || 'google-user',
+              picture: payload.picture || '',
+              provider: 'google',
+              isGuest: false
+            }, authRememberInput.checked);
+          }
+        });
+        window.google.accounts.id.prompt();
+      } catch (err) {
+        showAuthError("Google Sign-In error: Verify your Client ID and Authorized JavaScript origin.");
+      }
+    }
+
+    document.getElementById('google-login-btn').addEventListener('click', startGoogleSignIn);
+    const openGoogleSetupBtn = document.getElementById('open-google-setup-btn');
+    if (DEFAULT_GOOGLE_CLIENT_ID && openGoogleSetupBtn) {
+      openGoogleSetupBtn.style.display = 'none';
+    }
+    openGoogleSetupBtn.addEventListener('click', () => {
+      googleClientIdInput.value = getGoogleClientId();
+      googleSetupModal.classList.add('open');
+    });
+    document.getElementById('close-google-setup-modal').addEventListener('click', () => {
+      googleSetupModal.classList.remove('open');
+    });
+    document.getElementById('save-google-client-id-btn').addEventListener('click', () => {
+      const val = googleClientIdInput.value.trim();
+      if (!val || !val.includes('.apps.googleusercontent.com')) {
+        showToast("Enter a valid .apps.googleusercontent.com Client ID");
+        return;
+      }
+      try {
+        localStorage.setItem(GOOGLE_CLIENT_ID_STORAGE_KEY, val);
+      } catch (e) {}
+      googleSetupModal.classList.remove('open');
+      showToast("Google Client ID saved!");
+      startGoogleSignIn();
+    });
+    document.getElementById('demo-google-login-btn').addEventListener('click', () => {
+      googleSetupModal.classList.remove('open');
+      completeLogin({
+        name: 'Alex Google',
+        email: 'alex.demo@gmail.com',
+        picture: '',
+        provider: 'google',
+        isGuest: false
+      }, authRememberInput.checked);
+    });
+
+    // Account Modal Controls
+    document.getElementById('account-menu-btn').addEventListener('click', () => {
+      const totalReps = Object.values(sessionRepHistory).reduce((a, b) => a + b, 0);
+      modalUserRepsEl.textContent = totalReps;
+      accountModal.classList.add('open');
+    });
+    document.getElementById('close-account-modal').addEventListener('click', () => {
+      accountModal.classList.remove('open');
+    });
+    document.getElementById('clear-user-reps-btn').addEventListener('click', () => {
+      sessionRepHistory = {};
+      saveUserWorkoutData();
+      modalUserRepsEl.textContent = '0';
+      renderExerciseList();
+      showToast("Saved rep history cleared");
+    });
+    document.getElementById('sign-out-btn').addEventListener('click', signOutUser);
+
+    // Add Custom Exercise Modal
+    const addModal = document.getElementById('add-exercise-modal');
+    document.getElementById('open-add-exercise-btn').addEventListener('click', () => {
+      addModal.classList.add('open');
+    });
+    document.getElementById('close-add-modal').addEventListener('click', () => {
+      addModal.classList.remove('open');
+    });
+    document.getElementById('save-custom-ex-btn').addEventListener('click', () => {
+      const nameInput = document.getElementById('custom-ex-name').value.trim();
+      if (!nameInput) {
+        showToast("Please enter an exercise name");
+        return;
+      }
+      const cat = document.getElementById('custom-ex-cat').value;
+      const stance = document.getElementById('custom-ex-posture').value;
+      const joint = document.getElementById('custom-ex-joint').value;
+      const downAng = parseInt(document.getElementById('custom-ex-down').value, 10) || 90;
+      const upAng = parseInt(document.getElementById('custom-ex-up').value, 10) || 160;
+
+      const newEx = {
+        id: 'custom_' + Date.now(),
+        name: nameInput,
+        shortLabel: nameInput.split(' ')[0],
+        category: cat,
+        badge: `${downAng}° Target`,
+        featured: false,
+        stance: stance,
+        primaryJoint: joint,
+        downThreshold: downAng,
+        upThreshold: upAng,
+        primaryLabel: `${joint.toUpperCase()} Angle`,
+        primaryTargetText: `Target: ≤ ${downAng}°`,
+        secondaryLabel: 'Spine / Torso Line',
+        secondaryTargetText: 'Target: 155° - 180°',
+        description: `Custom ${stance} exercise tracking ${joint} angle between ${downAng}° and ${upAng}°.`,
+        setupHint: `Position yourself sideways in a ${stance} stance. Lower to ${downAng}° and return to ${upAng}°.`,
+        tags: [cat, `${downAng}° Depth`, stance === 'plank' ? 'Plank Gate' : 'Standing Gate']
+      };
+
+      exercises.push(newEx);
+      saveUserWorkoutData();
+
+      document.getElementById('custom-ex-name').value = '';
+      addModal.classList.remove('open');
+      renderExerciseList();
+      showToast(`Added "${newEx.name}" to list!`);
+    });
+
+    // Restore Active Session or Show Login Screen on Load
+    (function bootApp() {
+      try {
+        const savedSession = localStorage.getItem(AUTH_SESSION_KEY) || sessionStorage.getItem(AUTH_SESSION_KEY);
+        if (savedSession) {
+          const user = JSON.parse(savedSession);
+          if (user && user.email) {
+            completeLogin(user, !!localStorage.getItem(AUTH_SESSION_KEY));
+            return;
+          }
+        }
+      } catch (e) {}
+      authScreen.style.display = 'flex';
+      exerciseMenu.style.display = 'none';
+      renderExerciseList();
+    })();
+  </script>
+</body>
+</html>
